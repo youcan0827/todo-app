@@ -1,14 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-CLI TODO管理アプリケーション
-ターミナル上で動作するシンプルなタスク管理システム
-"""
 
 import csv
 import os
 import datetime
 from typing import List, Dict, Optional
+from nlp_processor import NLPProcessor
 
 
 # CSVファイルのパス定義
@@ -16,29 +13,19 @@ CSV_FILE = "tasks.csv"
 # CSVヘッダー定義
 CSV_HEADERS = ["task_name", "due_date", "status", "created_at"]
 
-
+# csvファイルがない場合作る
 def initialize_csv() -> None:
-    """
-    CSVファイルが存在しない場合、ヘッダー付きで新規作成する
-    この関数はアプリ起動時に自動実行される
-    """
     if not os.path.exists(CSV_FILE):
         with open(CSV_FILE, 'w', newline='', encoding='utf-8') as file:
             writer = csv.writer(file)
             writer.writerow(CSV_HEADERS)
 
-
+# csvファイルを読み込む時によく使う関数
 def read_tasks() -> List[Dict[str, str]]:
-    """
-    CSVファイルからタスクデータを読み込み、辞書形式のリストで返す
-    ファイルが存在しない場合は空のリストを返す
-    
-    Returns:
-        List[Dict]: タスク情報の辞書リスト
-    """
     tasks = []
     try:
         with open(CSV_FILE, 'r', encoding='utf-8') as file:
+            # csvを辞書形式で読み込んで、tasksに格納する
             reader = csv.DictReader(file)
             for row in reader:
                 tasks.append(row)
@@ -47,26 +34,15 @@ def read_tasks() -> List[Dict[str, str]]:
         pass
     return tasks
 
-
+# csvファイルに書き込む時によく使う関数
 def write_tasks(tasks: List[Dict[str, str]]) -> None:
-    """
-    タスクリストをCSVファイルに保存する
-    既存のファイルは上書きされる
-    
-    Args:
-        tasks: 保存するタスク情報の辞書リスト
-    """
     with open(CSV_FILE, 'w', newline='', encoding='utf-8') as file:
         writer = csv.DictWriter(file, fieldnames=CSV_HEADERS)
         writer.writeheader()
         writer.writerows(tasks)
 
-
+# 「タスク追加」の時に呼び出す
 def add_task() -> None:
-    """
-    新しいタスクを追加する機能
-    ユーザーからタスク名と期限を入力受付し、CSVに保存する
-    """
     print("\n=== タスク追加 ===")
     
     # タスク名入力
@@ -81,6 +57,7 @@ def add_task() -> None:
     # 期限の形式バリデーション（簡易）
     if due_date:
         try:
+            # 多分既存のdatetimeモジュールのstriptimeを呼び出して%Y-%m-%dの形にしているのかな
             datetime.datetime.strptime(due_date, "%Y-%m-%d")
         except ValueError:
             print("エラー: 期限は YYYY-MM-DD 形式で入力してください。")
@@ -94,19 +71,46 @@ def add_task() -> None:
         "created_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     }
     
-    # 既存タスクを読み込み、新規タスクを追加
+    # 既存タスクを読み込み、新規タスクを追加 
+    # read_task関数呼び出して、csv読み込んで、そこにnew_taskを追加して保存する
+    # new_tasks（詳細の情報）はtasksに追加されて、tasksはread_tasks()である。じゃあread_tasks()は、、
     tasks = read_tasks()
     tasks.append(new_task)
     write_tasks(tasks)
     
     print(f"タスク「{task_name}」が追加されました。")
 
+def add_task_from_nlp(parsed_data: Dict) -> None:
+    task_name = parsed_data.get("task_name", "").strip()
+    due_date = parsed_data.get("due_date", "").strip()
+    
+    if not task_name:
+        print("エラー: タスク名が特定できませんでした。")
+        return
+    
+    if due_date:
+        try:
+            datetime.datetime.strptime(due_date, "%Y-%m-%d")
+        except ValueError:
+            print(f"警告: 期限の形式が不正です（{due_date}）。期限なしで登録します。")
+            due_date = ""
+    
+    new_task = {
+        "task_name": task_name,
+        "due_date": due_date,
+        "status": "todo",
+        "created_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    }
+    
+    tasks = read_tasks()
+    tasks.append(new_task)
+    write_tasks(tasks)
+    
+    due_info = f" (期限: {due_date})" if due_date else ""
+    print(f"タスク「{task_name}」を追加しました{due_info}")
 
+# [タスク確認]の際に呼び出す
 def show_tasks() -> None:
-    """
-    すべてのタスクを一覧表示する機能
-    タスクが存在しない場合は適切なメッセージを表示する
-    """
     print("\n=== タスク一覧 ===")
     tasks = read_tasks()
     
@@ -115,17 +119,15 @@ def show_tasks() -> None:
         return
     
     # タスクを番号付きで表示
+    # 通常インデックス番号は0からだが、enumerateを使用することで1から表示できる
+    # iが数字で、taskは辞書内容？
     for i, task in enumerate(tasks, 1):
         due_info = f" (期限: {task['due_date']})" if task['due_date'] else ""
         status_jp = "完了" if task["status"] == "done" else "未完了"
         print(f"[No.{i}] {task['task_name']}{due_info} - Status: {status_jp}")
 
-
+# 「タスク完了」の際に呼び出す
 def complete_task() -> None:
-    """
-    指定したタスクを完了状態にする機能
-    タスク一覧を表示後、ユーザーに完了するタスク番号を選択させる
-    """
     print("\n=== タスク完了 ===")
     tasks = read_tasks()
     
@@ -134,16 +136,21 @@ def complete_task() -> None:
         return
     
     # 未完了タスクのみ表示
+    # statusがtodoのものはincomplate_tasksだと定義
     incomplete_tasks = [task for task in tasks if task["status"] == "todo"]
     
+    # もしincomplateなタスクがなければ完了可能にできるタスクはないと返す
     if not incomplete_tasks:
         print("完了可能なタスクがありません。")
         return
     
+    # 未完了のタスクを表示
     print("未完了のタスク:")
     task_indices = []
     display_count = 1
     
+    # enumerateで1からカウントして表示
+    # タスクのstatusがtodoなら具体的に情報を表示する
     for i, task in enumerate(tasks):
         if task["status"] == "todo":
             due_info = f" (期限: {task['due_date']})" if task['due_date'] else ""
@@ -151,6 +158,7 @@ def complete_task() -> None:
             task_indices.append(i)
             display_count += 1
     
+    # ここ少しむずい
     try:
         choice = int(input("\n完了するタスクの番号を入力してください: "))
         if 1 <= choice <= len(task_indices):
@@ -163,26 +171,177 @@ def complete_task() -> None:
     except ValueError:
         print("エラー: 数値を入力してください。")
 
+def natural_language_mode() -> None:
+    # 4が選択されたらこのテキストが出力される
+    print("\n=== 自然言語モード ===")
+    print("自然な日本語でタスクの操作を指示してください。")
+    print("例: '明日までに買い物を追加して'、'1番目のタスクを削除'、'タスク一覧を見せて'")
+    print("'戻る'と入力すると通常モードに戻ります。\n")
+    
+    # NLPProcessorクラス（APIに関する処理）を呼び出して、それが無理ならエラーを出力
+    try:
+        #これがAPIの確認と呼び出し
+        nlp = NLPProcessor()
+    except ValueError as e:
+        print(f"エラー: {e}")
+        print("環境変数GOOGLE_API_KEYを設定してください。")
+        return
+    
+    # while True（何がTrueの間なんだろう？）
+    while True:
+        user_input = input("自然言語で操作を指示してください: ").strip()
+        
+        # この四つが入力されないと戻れないのが不便←APIが呼び出せない時の対処
+        if user_input.lower() in ['戻る', 'back', 'exit', 'quit']:
+            break
+        
+        # 入力がない場合は何もしない
+        if not user_input:
+            continue
+        
+        # actionの変数に対するparsed_data.getはnlp_processor.pyから関数の中身を呼び出している
+        try:
+            parsed_data = nlp.parse_natural_language(user_input)
+            action = parsed_data.get("action", "UNKNOWN")
+            
+            confirmation = nlp.generate_confirmation_message(parsed_data)
+            print(f"解釈: {confirmation}")
+            
+            if action == "UNKNOWN":
+                print("操作を理解できませんでした。もう一度お試しください。")
+                continue
+            
+            confirm = input("この操作を実行しますか？ (y/n): ").strip().lower()
+            if confirm not in ['y', 'yes', 'はい']:
+                print("操作をキャンセルしました。")
+                continue
+            
+            # それぞれのアクションに対する変数を呼び出す。ADDだったらadd_keywords = ["追加", "作成", "新規", "登録", "add", "create", "new"]
+            if action == "ADD":
+                # add_keywordsの中のどれかが入力されたらadd_task_from_nlpを呼び出す？でもnlp_processor.pyになかった
+                add_task_from_nlp(parsed_data)
+            elif action == "SHOW":
+                show_tasks()
+            elif action == "EDIT":
+                edit_task_from_nlp(parsed_data)
+            elif action == "DELETE":
+                delete_task_from_nlp(parsed_data)
+            elif action == "COMPLETE":
+                complete_task_from_nlp(parsed_data)
+            
+        except Exception as e:
+            print(f"エラーが発生しました: {e}")
 
+# タスク編集について
+def edit_task_from_nlp(parsed_data: Dict) -> None:
+    tasks = read_tasks()
+    if not tasks:
+        print("タスクがありません。")
+        return
+    
+    task_index = parsed_data.get("task_index")
+    task_name = parsed_data.get("task_name", "")
+    
+    target_index = None
+    
+    if task_index and 1 <= task_index <= len(tasks):
+        target_index = task_index - 1
+    elif task_name:
+        for i, task in enumerate(tasks):
+            if task_name.lower() in task["task_name"].lower():
+                target_index = i
+                break
+    
+    if target_index is None:
+        print("対象のタスクが見つかりませんでした。")
+        return
+    
+    old_task = tasks[target_index]
+    print(f"編集対象: {old_task['task_name']}")
+    
+    new_name = input(f"新しいタスク名 (現在: {old_task['task_name']}): ").strip()
+    if new_name:
+        tasks[target_index]["task_name"] = new_name
+    
+    new_due = input(f"新しい期限 (現在: {old_task['due_date']}): ").strip()
+    if new_due:
+        try:
+            datetime.datetime.strptime(new_due, "%Y-%m-%d")
+            tasks[target_index]["due_date"] = new_due
+        except ValueError:
+            print("期限の形式が不正です。変更しませんでした。")
+    
+    write_tasks(tasks)
+    print("タスクを編集しました。")
+
+def delete_task_from_nlp(parsed_data: Dict) -> None:
+    tasks = read_tasks()
+    if not tasks:
+        print("タスクがありません。")
+        return
+    
+    task_index = parsed_data.get("task_index")
+    task_name = parsed_data.get("task_name", "")
+    
+    target_index = None
+    
+    if task_index and 1 <= task_index <= len(tasks):
+        target_index = task_index - 1
+    elif task_name:
+        for i, task in enumerate(tasks):
+            if task_name.lower() in task["task_name"].lower():
+                target_index = i
+                break
+    
+    if target_index is None:
+        print("対象のタスクが見つかりませんでした。")
+        return
+    
+    deleted_task = tasks.pop(target_index)
+    write_tasks(tasks)
+    print(f"タスク「{deleted_task['task_name']}」を削除しました。")
+
+def complete_task_from_nlp(parsed_data: Dict) -> None:
+    tasks = read_tasks()
+    if not tasks:
+        print("タスクがありません。")
+        return
+    
+    task_index = parsed_data.get("task_index")
+    task_name = parsed_data.get("task_name", "")
+    
+    target_index = None
+    
+    if task_index and 1 <= task_index <= len(tasks):
+        target_index = task_index - 1
+    elif task_name:
+        for i, task in enumerate(tasks):
+            if task_name.lower() in task["task_name"].lower() and task["status"] == "todo":
+                target_index = i
+                break
+    
+    if target_index is None:
+        print("対象の未完了タスクが見つかりませんでした。")
+        return
+    
+    tasks[target_index]["status"] = "done"
+    write_tasks(tasks)
+    print(f"タスク「{tasks[target_index]['task_name']}」を完了しました。")
+
+# メニュー画面
 def show_menu() -> None:
-    """
-    メインメニューを表示する
-    """
     print("\n" + "="*40)
     print("         CLI TODO管理アプリ")
     print("="*40)
     print("1. タスク追加")
     print("2. タスク確認")
     print("3. タスク完了")
-    print("4. 終了")
+    print("4. 自然言語モード")
+    print("5. 終了")
     print("="*40)
 
-
+# メニュー画面の選択に応じた挙動
 def main() -> None:
-    """
-    アプリケーションのメイン処理
-    ユーザーの選択に応じて各機能を呼び出すループ処理
-    """
     # CSVファイル初期化
     initialize_csv()
     
@@ -190,7 +349,7 @@ def main() -> None:
     
     while True:
         show_menu()
-        choice = input("選択してください (1-4): ").strip()
+        choice = input("選択してください (1-5): ").strip()
         
         if choice == "1":
             add_task()
@@ -199,10 +358,12 @@ def main() -> None:
         elif choice == "3":
             complete_task()
         elif choice == "4":
+            natural_language_mode()
+        elif choice == "5":
             print("アプリケーションを終了します。")
             break
         else:
-            print("エラー: 1-4の数字を入力してください。")
+            print("エラー: 1-5の数字を入力してください。")
 
 
 if __name__ == "__main__":
