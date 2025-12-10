@@ -37,8 +37,11 @@ def read_tasks() -> List[Dict[str, str]]:
 # csvファイルに書き込む時によく使う関数
 def write_tasks(tasks: List[Dict[str, str]]) -> None:
     with open(CSV_FILE, 'w', newline='', encoding='utf-8') as file:
+        # csvモジュールにおけるDictWriterメソッドをを呼び出す
         writer = csv.DictWriter(file, fieldnames=CSV_HEADERS)
+        # ヘッダーを書き込む
         writer.writeheader()
+        # tasksを書き込む
         writer.writerows(tasks)
 
 # 「タスク追加」の時に呼び出す
@@ -75,7 +78,9 @@ def add_task() -> None:
     # read_task関数呼び出して、csv読み込んで、そこにnew_taskを追加して保存する
     # new_tasks（詳細の情報）はtasksに追加されて、tasksはread_tasks()である。じゃあread_tasks()は、、
     tasks = read_tasks()
+    # tasksにnew_taskを追加
     tasks.append(new_task)
+    # write_tasks関数を呼び出して、tasksをcsvファイルに書き込む
     write_tasks(tasks)
     
     print(f"タスク「{task_name}」が追加されました。")
@@ -129,6 +134,7 @@ def show_tasks() -> None:
 # 「タスク完了」の際に呼び出す
 def complete_task() -> None:
     print("\n=== タスク完了 ===")
+    # read_tasks関数を呼び出して、csvファイルを読み込み、tasksという変数に格納する
     tasks = read_tasks()
     
     if not tasks:
@@ -151,6 +157,7 @@ def complete_task() -> None:
     
     # enumerateで1からカウントして表示
     # タスクのstatusがtodoなら具体的に情報を表示する
+    # tasksは本来read_tasksであり、new_tasksでもある
     for i, task in enumerate(tasks):
         if task["status"] == "todo":
             due_info = f" (期限: {task['due_date']})" if task['due_date'] else ""
@@ -158,7 +165,7 @@ def complete_task() -> None:
             task_indices.append(i)
             display_count += 1
     
-    # ここ少しむずい
+    # 未完了のタスクを見つけた時の上書きアプローチをtryで実行
     try:
         choice = int(input("\n完了するタスクの番号を入力してください: "))
         if 1 <= choice <= len(task_indices):
@@ -184,14 +191,14 @@ def natural_language_mode() -> None:
         nlp = NLPProcessor()
     except ValueError as e:
         print(f"エラー: {e}")
-        print("環境変数GOOGLE_API_KEYを設定してください。")
+        print("環境変数OPENROUTER_API_KEYを設定してください。")
         return
     
-    # while True（何がTrueの間なんだろう？）
+    # while True（APIが稼働できている状態の時？）
     while True:
         user_input = input("自然言語で操作を指示してください: ").strip()
         
-        # この四つが入力されないと戻れないのが不便←APIが呼び出せない時の対処
+        # この四つが入力されないと戻れない（元のインターフェースに戻る時のみ）
         if user_input.lower() in ['戻る', 'back', 'exit', 'quit']:
             break
         
@@ -200,11 +207,18 @@ def natural_language_mode() -> None:
             continue
         
         # actionの変数に対するparsed_data.getはnlp_processor.pyから関数の中身を呼び出している
+        # これがキーワードではなく、自然言語処理を行うコード部分
         try:
+            # ユーザーインプットを引数に入れてparse_natural_language関数を呼び出す
+            # parsed_natural_language関数のリターン値（json）をparsed_dataとして格納できる
+            # これって元々の自然言語である引数のuser_inputがリターン値に成長して返ってきているということ？←その通り
             parsed_data = nlp.parse_natural_language(user_input)
             action = parsed_data.get("action", "UNKNOWN")
             
+            #　confirmationにJSON形式のメッセージを引数に入れてgenerate_confirmation_message関数を呼び出す
+            # リターンで〜という{task_name}を〜〜しますとリターンが返ってくる
             confirmation = nlp.generate_confirmation_message(parsed_data)
+            # 〜〜という{task_name}を〜〜しますと出力
             print(f"解釈: {confirmation}")
             
             if action == "UNKNOWN":
