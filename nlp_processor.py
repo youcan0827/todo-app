@@ -4,25 +4,23 @@
 import os
 import re
 import datetime
+import requests
+import json
 from typing import Dict, Optional, List, Tuple
 from dotenv import load_dotenv
-from langchain_openai import ChatOpenAI
-from langchain_core.messages import HumanMessage, SystemMessage
 
 load_dotenv()
 
+# NLPProcessorでAPI確認と使用するモデル、プロンプト定義を行う
 class NLPProcessor:
     def __init__(self):
         api_key = os.getenv("OPENROUTER_API_KEY")
         if not api_key:
             raise ValueError("OPENROUTER_API_KEY環境変数が設定されていません")
         
-        self.llm = ChatOpenAI(
-            model="openai/gpt-3.5-turbo",
-            openai_api_key=api_key,
-            openai_api_base="https://openrouter.ai/api/v1",
-            temperature=0.1
-        )
+        self.api_key = api_key
+        self.api_url = "https://openrouter.ai/api/v1/chat/completions"
+        self.model = "openai/gpt-3.5-turbo"
         
         self.system_prompt = """あなたはタスク管理アプリの自然言語処理エンジンです。
 ユーザーの入力を分析して、以下の操作のいずれかを特定してください：
@@ -45,28 +43,46 @@ class NLPProcessor:
     "confidence": 0.0-1.0の確信度
 }"""
 
+#この関数の意味がわからない
     def parse_natural_language(self, user_input: str) -> Dict[str, any]:
         try:
-            messages = [
-                SystemMessage(content=self.system_prompt),
-                HumanMessage(content=f"ユーザー入力: {user_input}")
-            ]
+            headers = {
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json"
+            }
             
-            response = self.llm.invoke(messages)
-            result = self._extract_json_from_response(response.content)
+            data = {
+                "model": self.model,
+                "messages": [
+                    {"role": "system", "content": self.system_prompt},
+                    {"role": "user", "content": f"ユーザー入力: {user_input}"}
+                ],
+                "temperature": 0.1
+            }
             
+            response = requests.post(self.api_url, headers=headers, json=data)
+            response.raise_for_status()
+            
+            response_data = response.json()
+            ai_response = response_data["choices"][0]["message"]["content"]
+            
+            # AIの回答テキストをJSON形式のみを抽出する
+            result = self._extract_json_from_response(ai_response)
+            
+            # JSON形式で抽出できなかった場合は、キーワードの出力内容を返す
             if not result:
                 return self._fallback_parse(user_input)
             
             return result
             
         except Exception as e:
-            print(f"OpenRouter API処理エラー: {e}")
+            print(f"LLM処理エラー: {e}")
             return self._fallback_parse(user_input)
-
+# AIの回答テキストからJSON部分のみを抽出
     def _extract_json_from_response(self, response_text: str) -> Optional[Dict]:
         import json
         
+        # ここがわかりずらい
         json_pattern = r'\{.*?\}'
         matches = re.findall(json_pattern, response_text, re.DOTALL)
         
@@ -77,16 +93,19 @@ class NLPProcessor:
                 continue
         
         return None
-
+    
+    # api呼び出し失敗時はキーワードで出力内容を決定する
     def _fallback_parse(self, user_input: str) -> Dict[str, any]:
         user_input = user_input.lower()
         
+        # それぞれの機能で想定されるキーワードを設定し、変数に格納
         add_keywords = ["追加", "作成", "新規", "登録", "add", "create", "new"]
         edit_keywords = ["編集", "修正", "変更", "更新", "edit", "modify", "update"]
         delete_keywords = ["削除", "消去", "remove", "delete"]
         show_keywords = ["表示", "確認", "一覧", "show", "list", "view"]
         complete_keywords = ["完了", "終了", "done", "complete", "finish"]
         
+        # add_keywordsの要素からキーワードを見つけたらactionをADDに設定する
         action = "UNKNOWN"
         if any(keyword in user_input for keyword in add_keywords):
             action = "ADD"
@@ -99,6 +118,7 @@ class NLPProcessor:
         elif any(keyword in user_input for keyword in complete_keywords):
             action = "COMPLETE"
         
+        # タスク名、期限、タスク番号を設定する
         task_name = self._extract_task_name(user_input)
         due_date = self._extract_due_date(user_input)
         task_index = self._extract_task_index(user_input)
@@ -111,27 +131,34 @@ class NLPProcessor:
             "confidence": 0.7
         }
 
+# task_name = self._extract_task_name(user_input)におけるuser_inputに当たるタスク名を抽出する
     def _extract_task_name(self, text: str) -> str:
         quote_patterns = [r'"([^"]+)"', r"'([^']+)'", r"「([^」]+)」"]
         
+        # 符号が含まれていたら、その部分を抽出する
         for pattern in quote_patterns:
+            # reのモジュールにおけるfindballメソッドを用いて、パターンに一致する部分を抽出する
             matches = re.findall(pattern, text)
             if matches:
                 return matches[0]
         
+        # スプリットメソッドを用いて、文字列を区切る
         words = text.split()
         task_words = []
         skip_words = {"を", "の", "に", "で", "は", "が", "と", "から", "まで", "する", "した", "です", "ます"}
         
+        # スキップワードがないのであれば、タスク名を抽出する
         for word in words:
             if word not in skip_words and len(word) > 1:
                 task_words.append(word)
         
+        # 関数を呼び出している場所にタスク名を返している
         if task_words:
             return " ".join(task_words[:3])
         
         return ""
 
+# 期限を抽出する
     def _extract_due_date(self, text: str) -> Optional[str]:
         date_patterns = [
             r'(\d{4})-(\d{1,2})-(\d{1,2})',
@@ -190,6 +217,8 @@ class NLPProcessor:
         return None
 
     def generate_confirmation_message(self, parsed_data: Dict) -> str:
+        # Parsed_dataモジュールのgetメソッドを用いていると思ったが、これは違う
+        # わからない部分：parsed_dataはモジュールではなく、辞書型の変数であるってどういうどういうこと？
         action = parsed_data.get("action", "UNKNOWN")
         task_name = parsed_data.get("task_name", "")
         due_date = parsed_data.get("due_date", "")
