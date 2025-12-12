@@ -79,8 +79,8 @@ def generate_celebration_image(mood: str, save_file: bool = True, return_image: 
         
         # 環境に応じた保存先を決定
         if is_in_colab():
-            # Colab環境: /content/generated_images/に保存
-            image_dir = "/content/generated_images"
+            # Colab環境: /content/todo-app/generated_images/に保存
+            image_dir = "/content/todo-app/generated_images"
             env_label = "Colab"
         else:
             # ローカル環境: todo_appのgenerated_imagesフォルダ
