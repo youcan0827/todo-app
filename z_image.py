@@ -45,11 +45,16 @@ def is_in_colab():
         return False
 
 
-def generate_celebration_image(mood: str) -> None:
+def generate_celebration_image(mood: str, save_file: bool = True, return_image: bool = False):
     """気分に基づいてお祝い画像を生成してColabで表示する
     
     Args:
         mood: ユーザーの気分（例: "嬉しい", "達成感", "リラックス"など）
+        save_file: ファイルとして保存するかどうか（デフォルト: True）
+        return_image: PIL画像オブジェクトを返すかどうか（デフォルト: False）
+    
+    Returns:
+        PIL.Image.Image: return_imageがTrueの場合に画像オブジェクトを返す
     """
     pipe = initialize_z_image_model()
     
@@ -66,21 +71,46 @@ def generate_celebration_image(mood: str) -> None:
         generator=torch.manual_seed(42),
     ).images[0]
     
-    # Colabで画像を直接表示
-    print("🎉 タスク完了おめでとうございます！")
+    # ファイル保存オプション
+    if save_file:
+        filename = "output.png"
+        image.save(filename)
+        print(f"🎉 タスク完了！画像を '{filename}' に保存しました。")
+        print(f"表示するには: from PIL import Image; img = Image.open('{filename}'); img")
     
-    if is_in_colab():
-        # Colab環境では IPython.display を最優先で使用
-        try:
-            from IPython.display import display
-            display(image)
-        except Exception as e:
-            print(f"IPython.displayでの表示に失敗: {e}")
-            # フォールバック: matplotlib（フォント警告無効化）
+    # 表示オプション（従来機能）
+    if not save_file:
+        print("🎉 タスク完了おめでとうございます！")
+        
+        if is_in_colab():
+            # Colab環境では IPython.display を最優先で使用
             try:
+                from IPython.display import display
+                display(image)
+            except Exception as e:
+                print(f"IPython.displayでの表示に失敗: {e}")
+                # フォールバック: matplotlib（フォント警告無効化）
+                try:
+                    import matplotlib.pyplot as plt
+                    import matplotlib
+                    matplotlib.pyplot.rcParams['font.family'] = 'DejaVu Sans'
+                    import warnings
+                    warnings.filterwarnings('ignore', category=UserWarning, module='matplotlib')
+                    
+                    plt.figure(figsize=(10, 10))
+                    plt.imshow(image)
+                    plt.axis('off')
+                    plt.title(f"Generated Image: {mood}", fontsize=16)
+                    plt.tight_layout()
+                    plt.show()
+                except Exception as e2:
+                    print(f"matplotlib表示も失敗: {e2}")
+                    image.show()
+        else:
+            # 非Colab環境
+            try:
+                # matplotlibを試す
                 import matplotlib.pyplot as plt
-                import matplotlib
-                matplotlib.pyplot.rcParams['font.family'] = 'DejaVu Sans'
                 import warnings
                 warnings.filterwarnings('ignore', category=UserWarning, module='matplotlib')
                 
@@ -90,25 +120,12 @@ def generate_celebration_image(mood: str) -> None:
                 plt.title(f"Generated Image: {mood}", fontsize=16)
                 plt.tight_layout()
                 plt.show()
-            except Exception as e2:
-                print(f"matplotlib表示も失敗: {e2}")
+            except ImportError:
+                # 通常環境での表示
+                print("💡 画像生成が完了しました。")
                 image.show()
-    else:
-        # 非Colab環境
-        try:
-            # matplotlibを試す
-            import matplotlib.pyplot as plt
-            import warnings
-            warnings.filterwarnings('ignore', category=UserWarning, module='matplotlib')
-            
-            plt.figure(figsize=(10, 10))
-            plt.imshow(image)
-            plt.axis('off')
-            plt.title(f"Generated Image: {mood}", fontsize=16)
-            plt.tight_layout()
-            plt.show()
-        except ImportError:
-            # 通常環境での表示
-            print("💡 画像生成が完了しました。")
-            image.show()
+    
+    # 画像オブジェクトを返すオプション
+    if return_image:
+        return image
 
