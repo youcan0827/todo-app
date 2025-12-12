@@ -36,6 +36,15 @@ def initialize_z_image_model():
     return _pipe
 
 
+def is_in_colab():
+    """Google Colab環境かどうかを判定"""
+    try:
+        import google.colab
+        return True
+    except ImportError:
+        return False
+
+
 def generate_celebration_image(mood: str) -> None:
     """気分に基づいてお祝い画像を生成してColabで表示する
     
@@ -59,30 +68,47 @@ def generate_celebration_image(mood: str) -> None:
     
     # Colabで画像を直接表示
     print("🎉 タスク完了おめでとうございます！")
-    try:
-        # matplotlibを使って確実に画像表示
-        import matplotlib.pyplot as plt
-        import numpy as np
-        
-        plt.figure(figsize=(10, 10))
-        plt.imshow(np.array(image))
-        plt.axis('off')  # 軸を非表示
-        plt.title(f"🎨 {mood}な気分の画像", fontsize=16)
-        plt.tight_layout()
-        plt.show()
-    except ImportError:
-        # matplotlibが利用できない場合
+    
+    if is_in_colab():
+        # Colab環境では IPython.display を最優先で使用
         try:
-            # IPython.display.Imageで試行
-            from IPython.display import display, Image as IPImage
-            import io
+            from IPython.display import display
+            display(image)
+        except Exception as e:
+            print(f"IPython.displayでの表示に失敗: {e}")
+            # フォールバック: matplotlib（フォント警告無効化）
+            try:
+                import matplotlib.pyplot as plt
+                import matplotlib
+                matplotlib.pyplot.rcParams['font.family'] = 'DejaVu Sans'
+                import warnings
+                warnings.filterwarnings('ignore', category=UserWarning, module='matplotlib')
+                
+                plt.figure(figsize=(10, 10))
+                plt.imshow(image)
+                plt.axis('off')
+                plt.title(f"Generated Image: {mood}", fontsize=16)
+                plt.tight_layout()
+                plt.show()
+            except Exception as e2:
+                print(f"matplotlib表示も失敗: {e2}")
+                image.show()
+    else:
+        # 非Colab環境
+        try:
+            # matplotlibを試す
+            import matplotlib.pyplot as plt
+            import warnings
+            warnings.filterwarnings('ignore', category=UserWarning, module='matplotlib')
             
-            img_buffer = io.BytesIO()
-            image.save(img_buffer, format='PNG')
-            img_buffer.seek(0)
-            display(IPImage(data=img_buffer.getvalue()))
-        except:
+            plt.figure(figsize=(10, 10))
+            plt.imshow(image)
+            plt.axis('off')
+            plt.title(f"Generated Image: {mood}", fontsize=16)
+            plt.tight_layout()
+            plt.show()
+        except ImportError:
             # 通常環境での表示
-            print("💡 画像生成が完了しましたが、表示機能はColab専用です。")
+            print("💡 画像生成が完了しました。")
             image.show()
 
