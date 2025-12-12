@@ -96,3 +96,4 @@ def generate_celebration_image(mood: str) -> None:
     except Exception as e:
         print(f"画像生成エラー: {e}")
         print("画像生成をスキップします。")
+
