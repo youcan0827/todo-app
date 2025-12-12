@@ -60,19 +60,29 @@ def generate_celebration_image(mood: str) -> None:
     # Colabで画像を直接表示
     print("🎉 タスク完了おめでとうございます！")
     try:
-        # Colab/Jupyter環境での画像表示
-        from IPython.display import display, Image as IPImage
-        import io
+        # matplotlibを使って確実に画像表示
+        import matplotlib.pyplot as plt
+        import numpy as np
         
-        # PIL ImageをJPEGバイトストリームに変換
-        img_buffer = io.BytesIO()
-        image.save(img_buffer, format='PNG')
-        img_buffer.seek(0)
-        
-        # IPython.display.Imageで表示
-        display(IPImage(data=img_buffer.getvalue()))
+        plt.figure(figsize=(10, 10))
+        plt.imshow(np.array(image))
+        plt.axis('off')  # 軸を非表示
+        plt.title(f"🎨 {mood}な気分の画像", fontsize=16)
+        plt.tight_layout()
+        plt.show()
     except ImportError:
-        # IPythonが利用できない場合（通常のPython環境）
-        print("💡 画像生成が完了しましたが、表示機能はColab専用です。")
-        image.show()  # 通常環境での表示を試行
+        # matplotlibが利用できない場合
+        try:
+            # IPython.display.Imageで試行
+            from IPython.display import display, Image as IPImage
+            import io
+            
+            img_buffer = io.BytesIO()
+            image.save(img_buffer, format='PNG')
+            img_buffer.seek(0)
+            display(IPImage(data=img_buffer.getvalue()))
+        except:
+            # 通常環境での表示
+            print("💡 画像生成が完了しましたが、表示機能はColab専用です。")
+            image.show()
 
