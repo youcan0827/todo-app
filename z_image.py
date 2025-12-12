@@ -7,8 +7,19 @@
 import datetime
 import torch
 import diffusers
-from sdnq import SDNQConfig  # import sdnq to register it into diffusers and transformers
-from sdnq.loader import apply_sdnq_options_to_model
+
+# sdnqのインポート（オプショナル）
+try:
+    from sdnq import SDNQConfig  # import sdnq to register it into diffusers and transformers
+    from sdnq.loader import apply_sdnq_options_to_model
+    SDNQ_AVAILABLE = True
+except ImportError:
+    print("警告: sdnqライブラリが見つかりません。画像生成機能を使用するには以下をインストールしてください:")
+    print("  !pip install git+https://github.com/Disty0/sdnq")
+    SDNQ_AVAILABLE = False
+    # ダミー関数を定義
+    def apply_sdnq_options_to_model(model, use_quantized_matmul=True):
+        return model
 
 # モデルは初回のみ読み込む（グローバル変数として保持）
 _pipe = None
@@ -18,6 +29,31 @@ def initialize_z_image_model():
     """画像生成モデルを初期化する（初回のみ実行）"""
     global _pipe
     if _pipe is None:
+        # 既存のglobal pipeがあるかチェック（Colabで事前作成された場合）
+        import sys
+        if 'pipe' in globals() or hasattr(sys.modules.get('__main__', {}), 'pipe'):
+            try:
+                # グローバルスコープのpipeを使用
+                import __main__
+                if hasattr(__main__, 'pipe'):
+                    _pipe = __main__.pipe
+                    print("既存のpipeを再利用します。")
+                    return _pipe
+            except:
+                pass
+        if not SDNQ_AVAILABLE:
+            error_msg = (
+                "❌ sdnqライブラリがインストールされていません。\n"
+                "画像生成機能を使用するには、以下のコマンドでsdnqをインストールしてください:\n"
+                "  !pip install git+https://github.com/Disty0/sdnq\n\n"
+                "Colabで実行する場合:\n"
+                "  1. 新しいセルを作成\n"
+                "  2. !pip install git+https://github.com/Disty0/sdnq を実行\n"
+                "  3. ランタイムを再起動（ランタイム → ランタイムを再起動）\n"
+                "  4. 再度 main.py を実行"
+            )
+            raise ImportError(error_msg)
+        
         print("画像生成モデルを読み込んでいます...")
         try:
             _pipe = diffusers.ZImagePipeline.from_pretrained(
@@ -25,8 +61,9 @@ def initialize_z_image_model():
                 torch_dtype=torch.float32,
                 device_map="cuda"
             )
-            _pipe.transformer = apply_sdnq_options_to_model(_pipe.transformer, use_quantized_matmul=True)
-            _pipe.text_encoder = apply_sdnq_options_to_model(_pipe.text_encoder, use_quantized_matmul=True)
+            if SDNQ_AVAILABLE:
+                _pipe.transformer = apply_sdnq_options_to_model(_pipe.transformer, use_quantized_matmul=True)
+                _pipe.text_encoder = apply_sdnq_options_to_model(_pipe.text_encoder, use_quantized_matmul=True)
             print("モデルの読み込みが完了しました。")
         except Exception as e:
             print(f"モデルの読み込みエラー: {e}")
@@ -37,8 +74,9 @@ def initialize_z_image_model():
                     torch_dtype=torch.float32,
                     device_map="cpu"
                 )
-                _pipe.transformer = apply_sdnq_options_to_model(_pipe.transformer, use_quantized_matmul=True)
-                _pipe.text_encoder = apply_sdnq_options_to_model(_pipe.text_encoder, use_quantized_matmul=True)
+                if SDNQ_AVAILABLE:
+                    _pipe.transformer = apply_sdnq_options_to_model(_pipe.transformer, use_quantized_matmul=True)
+                    _pipe.text_encoder = apply_sdnq_options_to_model(_pipe.text_encoder, use_quantized_matmul=True)
                 print("モデルの読み込みが完了しました（CPUモード）。")
             except Exception as e2:
                 print(f"モデルの読み込みに失敗しました: {e2}")

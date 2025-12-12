@@ -180,7 +180,11 @@ def complete_task() -> None:
             mood = input("今の気分を教えてください（例: 嬉しい、達成感、リラックスなど）: ").strip()
             
             if mood:
-                generate_celebration_image(mood)
+                try:
+                    generate_celebration_image(mood)
+                except Exception as e:
+                    print(f"画像生成中にエラーが発生しました: {e}")
+                    print("タスクは正常に完了しましたが、画像生成をスキップします。")
             else:
                 print("気分の入力がなかったため、画像生成をスキップします。")
         else:
