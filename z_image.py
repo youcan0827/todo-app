@@ -77,8 +77,16 @@ def generate_celebration_image(mood: str, save_file: bool = True, return_image: 
         import os
         from datetime import datetime
         
-        # 画像保存フォルダを作成
-        image_dir = "/Users/yoshinomukanou/todo_app/generated_images"
+        # 環境に応じた保存先を決定
+        if is_in_colab():
+            # Colab環境: /content/generated_images/に保存
+            image_dir = "/content/generated_images"
+            env_label = "Colab"
+        else:
+            # ローカル環境: todo_appのgenerated_imagesフォルダ
+            image_dir = "/Users/yoshinomukanou/todo_app/generated_images"
+            env_label = "Local"
+        
         os.makedirs(image_dir, exist_ok=True)
         
         # タイムスタンプ付きファイル名
@@ -90,8 +98,13 @@ def generate_celebration_image(mood: str, save_file: bool = True, return_image: 
         image.save(full_path)
         
         print(f"🎉 タスク完了！画像を保存しました。")
+        print(f"🌐 環境: {env_label}")
         print(f"📂 保存場所: {full_path}")
-        print(f"📱 Finderで開く: open {image_dir}")
+        
+        if is_in_colab():
+            print(f"📁 Colabファイルブラウザで確認できます")
+        else:
+            print(f"📱 Finderで開く: open {image_dir}")
         
         # 自動で画像を表示
         try:
