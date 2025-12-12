@@ -58,13 +58,21 @@ def generate_celebration_image(mood: str) -> None:
     ).images[0]
     
     # Colabで画像を直接表示
+    print("🎉 タスク完了おめでとうございます！")
     try:
-        from IPython.display import display
-        print("🎉 タスク完了おめでとうございます！")
-        display(image)
+        # Colab/Jupyter環境での画像表示
+        from IPython.display import display, Image as IPImage
+        import io
+        
+        # PIL ImageをJPEGバイトストリームに変換
+        img_buffer = io.BytesIO()
+        image.save(img_buffer, format='PNG')
+        img_buffer.seek(0)
+        
+        # IPython.display.Imageで表示
+        display(IPImage(data=img_buffer.getvalue()))
     except ImportError:
         # IPythonが利用できない場合（通常のPython環境）
-        print("🎉 タスク完了おめでとうございます！")
         print("💡 画像生成が完了しましたが、表示機能はColab専用です。")
         image.show()  # 通常環境での表示を試行
 
