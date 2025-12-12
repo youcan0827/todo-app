@@ -74,18 +74,33 @@ def generate_celebration_image(mood: str, save_file: bool = True, return_image: 
     
     # ファイル保存オプション
     if save_file:
-        filename = "output.png"
-        image.save(filename)
-        print(f"🎉 タスク完了！画像を '{filename}' に保存しました。")
+        import os
+        from datetime import datetime
+        
+        # 画像保存フォルダを作成
+        image_dir = "/Users/yoshinomukanou/todo_app/generated_images"
+        os.makedirs(image_dir, exist_ok=True)
+        
+        # タイムスタンプ付きファイル名
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"celebration_{mood}_{timestamp}.png"
+        full_path = os.path.join(image_dir, filename)
+        
+        # 画像を保存
+        image.save(full_path)
+        
+        print(f"🎉 タスク完了！画像を保存しました。")
+        print(f"📂 保存場所: {full_path}")
+        print(f"📱 Finderで開く: open {image_dir}")
         
         # 自動で画像を表示
         try:
             from IPython.display import display
-            saved_img = Image.open(filename)
+            saved_img = Image.open(full_path)
             display(saved_img)
         except Exception as e:
             print(f"画像表示に失敗: {e}")
-            print(f"手動表示するには: from IPython.display import display; img = Image.open('{filename}'); display(img)")
+            print(f"手動表示するには: from IPython.display import display; img = Image.open('{full_path}'); display(img)")
     
     # 表示オプション（従来機能）
     if not save_file:
