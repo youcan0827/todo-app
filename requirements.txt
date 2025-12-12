@@ -5,6 +5,13 @@ langchain>=0.1.0
 langchain-openai>=0.1.0
 python-dotenv>=1.0.0
 
+# 画像生成機能に必要なパッケージ
+torch>=2.0.0
+diffusers>=0.21.0
+# sdnqはGitHubからインストールが必要（Colabでは自動インストール）
+# git+https://github.com/huggingface/diffusers
+# git+https://github.com/Disty0/sdnq
+
 # Python標準ライブラリのみ使用:
 # - csv: CSVファイルの読み書き
 # - os: ファイル存在確認

@@ -43,9 +43,10 @@ class NLPProcessor:
     "confidence": 0.0-1.0の確信度
 }"""
 
-#この関数の意味がわからない
+# main.pyで自然言語処理を行うときに呼び出す関数「
     def parse_natural_language(self, user_input: str) -> Dict[str, any]:
         try:
+            # HTTPヘッダーを準備
             headers = {
                 "Authorization": f"Bearer {self.api_key}",
                 "Content-Type": "application/json"
@@ -60,16 +61,17 @@ class NLPProcessor:
                 "temperature": 0.1
             }
             
+            # APIにリクエスト送信する
             response = requests.post(self.api_url, headers=headers, json=data)
             response.raise_for_status()
             
+            # 結果がJSON形式で返ってくる
             response_data = response.json()
             ai_response = response_data["choices"][0]["message"]["content"]
             
             # AIの回答テキストをJSON形式のみを抽出する
-            result = self._extract_json_from_response(ai_response)
-            
-            # JSON形式で抽出できなかった場合は、キーワードの出力内容を返す
+            result = self._extract_json_from_response(ai_response)            
+           
             if not result:
                 return self._fallback_parse(user_input)
             
@@ -82,11 +84,13 @@ class NLPProcessor:
     def _extract_json_from_response(self, response_text: str) -> Optional[Dict]:
         import json
         
-        # ここがわかりずらい
+        # jsonパターンを定義
         json_pattern = r'\{.*?\}'
+        # reのモジュールにおけるfindallメソッドを用いてjsonパターンに一致する部分を抽出
         matches = re.findall(json_pattern, response_text, re.DOTALL)
         
         for match in matches:
+             # json.loadsメソッドを用いてjson形式に変換する
             try:
                 return json.loads(match)
             except json.JSONDecodeError:
@@ -94,7 +98,7 @@ class NLPProcessor:
         
         return None
     
-    # api呼び出し失敗時はキーワードで出力内容を決定する
+    # LLM処理失敗時はキーワードで出力内容を決定する
     def _fallback_parse(self, user_input: str) -> Dict[str, any]:
         user_input = user_input.lower()
         
@@ -118,7 +122,7 @@ class NLPProcessor:
         elif any(keyword in user_input for keyword in complete_keywords):
             action = "COMPLETE"
         
-        # タスク名、期限、タスク番号を設定する
+        # task_name,due_date,task_indexごとに適した関数を呼び出し
         task_name = self._extract_task_name(user_input)
         due_date = self._extract_due_date(user_input)
         task_index = self._extract_task_index(user_input)
@@ -217,8 +221,7 @@ class NLPProcessor:
         return None
 
     def generate_confirmation_message(self, parsed_data: Dict) -> str:
-        # Parsed_dataモジュールのgetメソッドを用いていると思ったが、これは違う
-        # わからない部分：parsed_dataはモジュールではなく、辞書型の変数であるってどういうどういうこと？
+        # parsed_dataからgetメソッドを用いて抽出する
         action = parsed_data.get("action", "UNKNOWN")
         task_name = parsed_data.get("task_name", "")
         due_date = parsed_data.get("due_date", "")

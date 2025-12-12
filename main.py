@@ -6,6 +6,7 @@ import os
 import datetime
 from typing import List, Dict, Optional
 from nlp_processor import NLPProcessor
+from z_image import generate_celebration_image
 
 
 # CSVファイルのパス定義
@@ -173,6 +174,15 @@ def complete_task() -> None:
             tasks[actual_index]["status"] = "done"
             write_tasks(tasks)
             print(f"タスク「{tasks[actual_index]['task_name']}」を完了しました。")
+            
+            # 画像生成を追加
+            print("\nおめでとうございます！タスクを完了しました。")
+            mood = input("今の気分を教えてください（例: 嬉しい、達成感、リラックスなど）: ").strip()
+            
+            if mood:
+                generate_celebration_image(mood)
+            else:
+                print("気分の入力がなかったため、画像生成をスキップします。")
         else:
             print("エラー: 無効な番号です。")
     except ValueError:
