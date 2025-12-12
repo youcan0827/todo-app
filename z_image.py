@@ -6,6 +6,7 @@
 
 import torch
 import diffusers
+from PIL import Image
 from sdnq import SDNQConfig  # import sdnq to register it into diffusers and transformers
 from sdnq.loader import apply_sdnq_options_to_model
 
@@ -76,7 +77,7 @@ def generate_celebration_image(mood: str, save_file: bool = True, return_image: 
         filename = "output.png"
         image.save(filename)
         print(f"🎉 タスク完了！画像を '{filename}' に保存しました。")
-        print(f"表示するには: from PIL import Image; img = Image.open('{filename}'); img")
+        print(f"表示するには: img = Image.open('{filename}'); img")
     
     # 表示オプション（従来機能）
     if not save_file:
