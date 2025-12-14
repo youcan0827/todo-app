@@ -5,14 +5,31 @@ import csv
 import os
 import datetime
 from typing import List, Dict, Optional
-from nlp_processor import NLPProcessor
-from z_image import generate_celebration_image
+from core.nlp_processor import NLPProcessor
+# 画像生成機能（オプション）
+try:
+    from image.z_image import generate_celebration_image
+    IMAGE_GENERATION_AVAILABLE = True
+except ImportError:
+    IMAGE_GENERATION_AVAILABLE = False
+    def generate_celebration_image(mood):
+        print("画像生成機能は利用できません（依存関係が不足しています）")
+# 高機能自然言語モード（LangChain版）
+try:
+    from ai_agent.langchain_simple import simple_langchain_mode as advanced_natural_language_mode
+    ADVANCED_NLP_AVAILABLE = True
+    print("✅ LangChain高機能自然言語モードが利用可能です")
+except ImportError:
+    ADVANCED_NLP_AVAILABLE = False
+    def advanced_natural_language_mode():
+        print("高機能自然言語モードは利用できません（LangChain依存関係が不足しています）")
+        print("通常の自然言語モード（メニュー4）をご利用ください。")
 
 
 # CSVファイルのパス定義
 CSV_FILE = "tasks.csv"
 # CSVヘッダー定義
-CSV_HEADERS = ["task_name", "due_date", "status", "created_at"]
+CSV_HEADERS = ["task_name", "due_date", "status", "created_at", "calendar_event_id"]
 
 # csvファイルがない場合作る
 def initialize_csv() -> None:
@@ -72,7 +89,8 @@ def add_task() -> None:
         "task_name": task_name,
         "due_date": due_date,
         "status": "todo",
-        "created_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        "created_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "calendar_event_id": ""
     }
     
     # 既存タスクを読み込み、新規タスクを追加 
@@ -87,6 +105,7 @@ def add_task() -> None:
     print(f"タスク「{task_name}」が追加されました。")
 
 def add_task_from_nlp(parsed_data: Dict) -> None:
+    """従来の自然言語処理によるタスク追加（後方互換性のため）"""
     task_name = parsed_data.get("task_name", "").strip()
     due_date = parsed_data.get("due_date", "").strip()
     
@@ -105,7 +124,8 @@ def add_task_from_nlp(parsed_data: Dict) -> None:
         "task_name": task_name,
         "due_date": due_date,
         "status": "todo",
-        "created_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        "created_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "calendar_event_id": ""
     }
     
     tasks = read_tasks()
@@ -114,6 +134,66 @@ def add_task_from_nlp(parsed_data: Dict) -> None:
     
     due_info = f" (期限: {due_date})" if due_date else ""
     print(f"タスク「{task_name}」を追加しました{due_info}")
+
+def intelligent_add_task(user_input: str, nlp_processor) -> None:
+    """
+    インテリジェント・タスク追加機能
+    自然言語入力から日時情報を抽出し、Googleカレンダーに登録
+    """
+    try:
+        # タスク情報の抽出
+        task_info = nlp_processor.extract_task_info(user_input)
+        
+        print(f"解析結果: {task_info.summary}")
+        if task_info.has_datetime:
+            print(f"  開始日時: {task_info.start_datetime}")
+            print(f"  所要時間: {task_info.duration_minutes}分")
+        
+        # 確認
+        confirm = input("このタスクを追加しますか？ (y/n): ").strip().lower()
+        if confirm not in ['y', 'yes', 'はい']:
+            print("タスク追加をキャンセルしました。")
+            return
+        
+        # Googleカレンダーへの登録（日時情報がある場合）
+        calendar_event_id = ""
+        if task_info.has_datetime and nlp_processor.calendar_enabled:
+            calendar_event_id = nlp_processor.add_calendar_event(task_info)
+            if calendar_event_id:
+                print("✓ Googleカレンダーにイベントを作成しました")
+            else:
+                print("⚠ Googleカレンダーへの登録に失敗しました")
+        
+        # CSVファイルへの保存
+        # due_dateを適切な形式に変換
+        due_date = ""
+        if task_info.has_datetime and task_info.start_datetime:
+            try:
+                # ISO形式からYYYY-MM-DD形式に変換
+                dt = datetime.datetime.fromisoformat(task_info.start_datetime)
+                due_date = dt.strftime("%Y-%m-%d")
+            except:
+                pass
+        
+        new_task = {
+            "task_name": task_info.summary,
+            "due_date": due_date,
+            "status": "todo",
+            "created_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "calendar_event_id": calendar_event_id or ""
+        }
+        
+        tasks = read_tasks()
+        tasks.append(new_task)
+        write_tasks(tasks)
+        
+        # 結果の表示
+        calendar_info = " [📅カレンダー連携済み]" if calendar_event_id else ""
+        due_info = f" (期限: {due_date})" if due_date else ""
+        print(f"タスク「{task_info.summary}」を追加しました{due_info}{calendar_info}")
+        
+    except Exception as e:
+        print(f"インテリジェント・タスク追加でエラーが発生しました: {e}")
 
 # [タスク確認]の際に呼び出す
 def show_tasks() -> None:
@@ -175,18 +255,21 @@ def complete_task() -> None:
             write_tasks(tasks)
             print(f"タスク「{tasks[actual_index]['task_name']}」を完了しました。")
             
-            # 画像生成を追加
-            print("\nおめでとうございます！タスクを完了しました。")
-            mood = input("今の気分を教えてください（例: 嬉しい、達成感、リラックスなど）: ").strip()
-            
-            if mood:
-                try:
-                    generate_celebration_image(mood)
-                except Exception as e:
-                    print(f"画像生成中にエラーが発生しました: {e}")
-                    print("タスクは正常に完了しましたが、画像生成をスキップします。")
+            # 画像生成を追加（利用可能な場合のみ）
+            if IMAGE_GENERATION_AVAILABLE:
+                print("\nおめでとうございます！タスクを完了しました。")
+                mood = input("今の気分を教えてください（例: 嬉しい、達成感、リラックスなど）: ").strip()
+                
+                if mood:
+                    try:
+                        generate_celebration_image(mood)
+                    except Exception as e:
+                        print(f"画像生成中にエラーが発生しました: {e}")
+                        print("タスクは正常に完了しましたが、画像生成をスキップします。")
+                else:
+                    print("気分の入力がなかったため、画像生成をスキップします。")
             else:
-                print("気分の入力がなかったため、画像生成をスキップします。")
+                print("\nおめでとうございます！タスクを完了しました。")
         else:
             print("エラー: 無効な番号です。")
     except ValueError:
@@ -365,7 +448,9 @@ def show_menu() -> None:
     print("2. タスク確認")
     print("3. タスク完了")
     print("4. 自然言語モード")
-    print("5. 終了")
+    print("5. インテリジェント・タスク追加")
+    print("6. 🤖 LangChain高機能自然言語モード")
+    print("7. 終了")
     print("="*40)
 
 # メニュー画面の選択に応じた挙動
@@ -375,9 +460,12 @@ def main() -> None:
     
     print("CLI TODO管理アプリへようこそ！")
     
+    # NLPプロセッサーの初期化（必要時のみ）
+    nlp_processor = None
+    
     while True:
         show_menu()
-        choice = input("選択してください (1-5): ").strip()
+        choice = input("選択してください (1-7): ").strip()
         
         if choice == "1":
             add_task()
@@ -388,10 +476,32 @@ def main() -> None:
         elif choice == "4":
             natural_language_mode()
         elif choice == "5":
+            # インテリジェント・タスク追加
+            if nlp_processor is None:
+                try:
+                    nlp_processor = NLPProcessor()
+                except ValueError as e:
+                    print(f"エラー: {e}")
+                    print("OPENROUTER_API_KEY環境変数を設定してください。")
+                    continue
+            
+            print("\n=== インテリジェント・タスク追加 ===")
+            print("自然な日本語でタスクを入力してください。")
+            print("例: '金曜日の15時から会議', '明日の10時にプレゼン準備'")
+            
+            user_input = input("タスクを入力: ").strip()
+            if user_input:
+                intelligent_add_task(user_input, nlp_processor)
+            else:
+                print("入力が空です。")
+        elif choice == "6":
+            # 高機能自然言語モード
+            advanced_natural_language_mode()
+        elif choice == "7":
             print("アプリケーションを終了します。")
             break
         else:
-            print("エラー: 1-5の数字を入力してください。")
+            print("エラー: 1-7の数字を入力してください。")
 
 
 if __name__ == "__main__":

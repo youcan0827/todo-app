@@ -45,4 +45,12 @@ ehthumbs.db
 Thumbs.db
 
 # Data files (optional - uncomment if you don't want to track CSV data)
-# tasks.csv.env
+# tasks.csv
+
+# Google Calendar credentials and tokens
+config/credentials.json
+config/token.pickle
+*.pickle
+
+# Environment variables
+.env

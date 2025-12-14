@@ -8,8 +8,21 @@ import requests
 import json
 from typing import Dict, Optional, List, Tuple
 from dotenv import load_dotenv
+from google_calendar.calendar_client import CalendarClient
+from pydantic import BaseModel, Field
 
 load_dotenv()
+
+
+# Structured Output用のPydanticモデル
+class TaskInfo(BaseModel):
+    """タスク情報の抽出スキーマ"""
+    summary: str = Field(description="タスク名/イベント名")
+    start_datetime: Optional[str] = Field(None, description="開始日時（ISO形式）")
+    duration_minutes: Optional[int] = Field(None, description="所要時間（分）")
+    has_datetime: bool = Field(description="日時情報が含まれているかどうか")
+    confidence: float = Field(description="抽出の信頼度（0.0-1.0）")
+
 
 # NLPProcessorでAPI確認と使用するモデル、プロンプト定義を行う
 class NLPProcessor:
@@ -21,6 +34,17 @@ class NLPProcessor:
         self.api_key = api_key
         self.api_url = "https://openrouter.ai/api/v1/chat/completions"
         self.model = "openai/gpt-3.5-turbo"
+        
+        # Googleカレンダークライアントの初期化（オプション）
+        try:
+            self.calendar_client = CalendarClient()
+            self.calendar_enabled = True
+            print("✓ Googleカレンダー連携が有効になりました")
+        except Exception as e:
+            print(f"ℹ️  Googleカレンダー連携は無効です（{e}）")
+            print("   タスク管理機能は通常通り使用できます")
+            self.calendar_client = None
+            self.calendar_enabled = False
         
         self.system_prompt = """あなたはタスク管理アプリの自然言語処理エンジンです。
 ユーザーの入力を分析して、以下の操作のいずれかを特定してください：
@@ -252,3 +276,138 @@ class NLPProcessor:
             msg = "操作を理解できませんでした。もう一度お試しください。"
         
         return msg
+
+    def extract_task_info(self, text: str) -> TaskInfo:
+        """
+        自然言語入力からタスク情報を抽出（Structured Output）
+        
+        Args:
+            text: ユーザーの自然言語入力
+            
+        Returns:
+            TaskInfo: 抽出されたタスク情報
+        """
+        try:
+            system_prompt = """あなたはタスク管理アプリの情報抽出エンジンです。
+ユーザーの入力から以下の情報を抽出してください：
+
+1. summary: タスク名/イベント名
+2. start_datetime: 開始日時（ISO 8601形式、例: 2025-12-20T15:00:00）
+3. duration_minutes: 所要時間（分）、明記されていない場合は60分
+4. has_datetime: 日時情報が含まれているかどうか
+5. confidence: 抽出の信頼度（0.0-1.0）
+
+相対的な日時表現（今日、明日、金曜日など）は具体的な日時に変換してください。
+時刻が指定されていない場合は、適切なデフォルト時刻を設定してください。
+
+回答は必ずJSON形式で返してください：
+{
+    "summary": "抽出されたタスク名",
+    "start_datetime": "2025-12-20T15:00:00",
+    "duration_minutes": 60,
+    "has_datetime": true,
+    "confidence": 0.9
+}"""
+
+            headers = {
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json"
+            }
+            
+            data = {
+                "model": self.model,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": f"ユーザー入力: {text}"}
+                ],
+                "temperature": 0.1
+            }
+            
+            # APIにリクエストを送る
+            response = requests.post(self.api_url, headers=headers, json=data)
+            response.raise_for_status()
+            
+            response_data = response.json()
+            ai_response = response_data["choices"][0]["message"]["content"]
+            
+            # JSON形式の回答を抽出
+            result = self._extract_json_from_response(ai_response)
+            
+            if result:
+                return TaskInfo(**result)
+            else:
+                # フォールバック: 既存の抽出ロジックを使用
+                return self._fallback_extract_task_info(text)
+                
+        except Exception as e:
+            print(f"タスク情報抽出エラー: {e}")
+            return self._fallback_extract_task_info(text)
+
+    def _fallback_extract_task_info(self, text: str) -> TaskInfo:
+        """
+        LLM処理失敗時のフォールバック抽出
+        
+        Args:
+            text: ユーザー入力
+            
+        Returns:
+            TaskInfo: 抽出されたタスク情報
+        """
+        # 既存のロジックを使用
+        task_name = self._extract_task_name(text)
+        due_date = self._extract_due_date(text)
+        
+        # 日時情報の変換
+        start_datetime = None
+        has_datetime = False
+        
+        if due_date:
+            try:
+                # 日付のみの場合は適切な時刻を設定
+                if len(due_date) == 10:  # YYYY-MM-DD形式
+                    start_datetime = f"{due_date}T10:00:00"  # デフォルト10:00
+                else:
+                    start_datetime = due_date
+                has_datetime = True
+            except:
+                pass
+        
+        return TaskInfo(
+            summary=task_name if task_name else "新しいタスク",
+            start_datetime=start_datetime,
+            duration_minutes=60 if has_datetime else None,
+            has_datetime=has_datetime,
+            confidence=0.7
+        )
+
+    def add_calendar_event(self, task_info: TaskInfo) -> Optional[str]:
+        """
+        Googleカレンダーにイベントを作成
+        
+        Args:
+            task_info: タスク情報
+            
+        Returns:
+            イベントID（失敗時はNone）
+        """
+        if not self.calendar_enabled or not task_info.has_datetime:
+            return None
+            
+        try:
+            # 終了時刻を計算
+            start_dt = datetime.datetime.fromisoformat(task_info.start_datetime)
+            duration = datetime.timedelta(minutes=task_info.duration_minutes or 60)
+            end_dt = start_dt + duration
+            
+            event_id = self.calendar_client.create_event(
+                summary=task_info.summary,
+                start_datetime=start_dt.isoformat(),
+                end_datetime=end_dt.isoformat(),
+                description=f"タスク管理アプリから作成されたイベント"
+            )
+            
+            return event_id
+            
+        except Exception as e:
+            print(f"カレンダーイベント作成エラー: {e}")
+            return None
