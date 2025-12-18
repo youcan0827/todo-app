@@ -1,0 +1,10 @@
+{
+  "gentle": {
+    "success": 2,
+    "total": 4
+  },
+  "direct": {
+    "success": 1,
+    "total": 3
+  }
+}
