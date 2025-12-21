@@ -21,6 +21,81 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# 音声合成システム（オプション）
+class TTSSystem:
+    """音声合成システム（model_load使用）"""
+    
+    def __init__(self, model_name: str = "yoshino_test", model_dir: str = "model_assets", device: str = "cuda"):
+        self.model_name = model_name
+        self.model_dir = model_dir
+        self.device = device
+        self.tts_model = None
+        self.is_available = False
+        
+    def initialize_model(self):
+        """TTSモデルの初期化（遅延読み込み）"""
+        if self.tts_model is None:
+            try:
+                from model_load import load_model
+                
+                print(f"🔄 音声合成モデル読み込み中: {self.model_name}")
+                self.tts_model = load_model(
+                    model_name=self.model_name,
+                    model_dir=self.model_dir, 
+                    device=self.device
+                )
+                self.is_available = True
+                print("✅ 音声合成モデル読み込み完了")
+                
+            except ImportError:
+                print("⚠️ model_loadが見つかりません。音声合成は無効化されます")
+                self.is_available = False
+            except Exception as e:
+                print(f"❌ 音声合成モデル読み込みエラー: {e}")
+                self.is_available = False
+    
+    def text_to_speech(self, text: str, output_file: str = None) -> Optional[str]:
+        """テキストを音声に変換"""
+        if not self.is_available:
+            if self.tts_model is None:
+                self.initialize_model()
+            
+            if not self.is_available:
+                return None
+        
+        if output_file is None:
+            import datetime
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            output_file = f"hiroyuki_voice_{timestamp}.wav"
+        
+        try:
+            print(f"🎵 音声合成実行中: {output_file}")
+            
+            # TTSモデルで音声合成実行
+            self.tts_model.inference(text, output_file)
+            
+            print(f"✅ 音声ファイル生成完了: {output_file}")
+            return output_file
+            
+        except Exception as e:
+            print(f"❌ 音声合成エラー: {e}")
+            return None
+
+# グローバルTTSシステム（オプション）
+tts_system = None
+
+def initialize_tts_system(model_name: str = "yoshino_test", model_dir: str = "model_assets", device: str = "cuda"):
+    """TTSシステムを初期化"""
+    global tts_system
+    tts_system = TTSSystem(model_name, model_dir, device)
+    return tts_system
+
+def text_to_speech_if_available(text: str, output_file: str = None) -> Optional[str]:
+    """音声合成が利用可能な場合のみ実行"""
+    if tts_system is None:
+        return None
+    return tts_system.text_to_speech(text, output_file)
+
 # ひろゆき風応答関数（統合版）
 def _ensure_hiroyuki_csv_exists():
     """ひろゆき会話CSVファイルの初期化"""
@@ -931,11 +1006,16 @@ JSON形式のみで回答:
 
 
 def integrated_langchain_mode() -> None:
-    """統合LangChainモードのメイン処理"""
+    """統合LangChainモードのメイン処理（音声合成対応）"""
     print("\n=== 統合LangChain高機能自然言語モード ===")
     print("LangChainを使ってカレンダーとタスクの情報を検索してお答えします。")
+    print("🎵 音声合成機能付き（model_loadが利用可能な場合）")
     print("")
-    print("'戻る'と入力すると通常モードに戻ります。\n")
+    print("📋 特別コマンド:")
+    print("   - '戻る': 通常モードに戻る")
+    print("   - 'TTS設定 model_name model_dir device': 音声合成設定")
+    print("   - '効果レポート': ひろゆきモード効果分析")
+    print("")
     
     try:
         # エージェントの初期化
@@ -943,10 +1023,16 @@ def integrated_langchain_mode() -> None:
         agent = IntegratedLangChainAgent()
         
         if agent.llm_available:
-            print("✓ LLM機能付きで初期化完了\n")
+            print("✓ LLM機能付きで初期化完了")
         else:
-            print("⚠️ LLMなしモードで初期化完了（基本機能は利用可能）\n")
-            print("💡 高度なLLM機能を使用したい場合は、OPENROUTER_API_KEYを設定してください。\n")
+            print("⚠️ LLMなしモードで初期化完了（基本機能は利用可能）")
+            print("💡 高度なLLM機能を使用したい場合は、OPENROUTER_API_KEYを設定してください。")
+        
+        # 音声合成システムの初期化（オプション）
+        print("🎵 音声合成システム初期化中...")
+        tts = initialize_tts_system()
+        
+        print("")
         
     except Exception as e:
         print(f"❌ エージェント初期化エラー: {e}")
@@ -974,12 +1060,43 @@ def integrated_langchain_mode() -> None:
             print("-" * 60)
             continue
         
+        # TTS設定コマンド
+        if user_input.lower().startswith('tts設定'):
+            parts = user_input.split()
+            if len(parts) >= 2:
+                model_name = parts[1] if len(parts) > 1 else "yoshino_test"
+                model_dir = parts[2] if len(parts) > 2 else "model_assets"
+                device = parts[3] if len(parts) > 3 else "cuda"
+                
+                print(f"🎵 TTS再設定中: {model_name}, {model_dir}, {device}")
+                tts = initialize_tts_system(model_name, model_dir, device)
+                print("✅ TTS設定完了")
+            else:
+                print("📋 使用方法: 'TTS設定 model_name model_dir device'")
+                print("📋 例: 'TTS設定 yoshino_test model_assets cuda'")
+            continue
+        
         print("\n🔍 統合LangChainが情報を検索・分析しています...")
         
         # agentインスタンスのprocess_queryメソッドをを呼び出している
         response = agent.process_query(user_input)
         
         print(f"\n🤖 **回答**:\n{response}\n")
+        
+        # 音声合成実行（利用可能な場合）
+        audio_file = text_to_speech_if_available(response)
+        if audio_file:
+            print(f"🎵 音声ファイル: {audio_file}")
+            
+            # Googleコラボ環境なら自動再生のヒントを表示
+            try:
+                import google.colab
+                print("💡 Googleコラボで音声再生:")
+                print(f"   from IPython.display import Audio, display")
+                print(f"   display(Audio('{audio_file}'))")
+            except ImportError:
+                print(f"💡 音声ファイルが生成されました: {audio_file}")
+        
         print("-" * 60)
 
 
