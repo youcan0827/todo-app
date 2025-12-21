@@ -198,42 +198,6 @@ def natural_language_mode() -> None:
         print("pip install langchain langchain-openai python-dotenv")
 
 
-def show_conversation_history() -> None:
-    """AI対話履歴確認機能"""
-    print("\n=== AI対話履歴確認 ===")
-    
-    try:
-        import csv
-        conversations_file = "ai_conversations.csv"
-        
-        if not os.path.exists(conversations_file):
-            print("対話履歴がありません。")
-            return
-        
-        print("最新の対話履歴（10件）:")
-        print("-" * 80)
-        
-        with open(conversations_file, 'r', encoding='utf-8') as file:
-            reader = csv.DictReader(file)
-            conversations = list(reader)
-            
-            # 最新10件を表示
-            for conversation in conversations[-10:]:
-                timestamp = conversation.get('timestamp', 'N/A')
-                user_input = conversation.get('user_input', 'N/A')
-                ai_response = conversation.get('ai_response', 'N/A')[:100] + "..." if len(conversation.get('ai_response', '')) > 100 else conversation.get('ai_response', 'N/A')
-                tools_used = conversation.get('tools_used', '')
-                
-                print(f"【{timestamp}】")
-                print(f"質問: {user_input}")
-                print(f"回答: {ai_response}")
-                if tools_used:
-                    print(f"使用ツール: {tools_used}")
-                print("-" * 80)
-                
-    except Exception as e:
-        print(f"履歴表示エラー: {e}")
-
 
 
 # メニュー画面
@@ -245,8 +209,7 @@ def show_menu() -> None:
     print("2. タスク確認")
     print("3. タスク完了")
     print("4. 🤖 AI自然言語モード（LangChain統合）")
-    print("5. 📜 AI対話履歴確認")
-    print("6. 終了")
+    print("5. 終了")
     print("="*40)
 
 # メニュー画面の選択に応じた挙動
@@ -258,7 +221,7 @@ def main() -> None:
     
     while True:
         show_menu()
-        choice = input("選択してください (1-6): ").strip()
+        choice = input("選択してください (1-5): ").strip()
         
         if choice == "1":
             add_task()
@@ -269,12 +232,10 @@ def main() -> None:
         elif choice == "4":
             natural_language_mode()
         elif choice == "5":
-            show_conversation_history()
-        elif choice == "6":
             print("アプリケーションを終了します。")
             break
         else:
-            print("エラー: 1-6の数字を入力してください。")
+            print("エラー: 1-5の数字を入力してください。")
 
 
 if __name__ == "__main__":

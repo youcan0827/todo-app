@@ -7,6 +7,7 @@ import csv
 import datetime
 import json
 import pickle
+import re
 from typing import Any, Dict, List, Optional, Tuple
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -19,6 +20,75 @@ from googleapiclient.errors import HttpError
 from dotenv import load_dotenv
 
 load_dotenv()
+
+# ひろゆき風応答関数（統合版）
+def _ensure_hiroyuki_csv_exists():
+    """ひろゆき会話CSVファイルの初期化"""
+    conversation_log = "/Users/yoshinomukanou/todo_app/simple_conversations.csv"
+    if not os.path.exists(conversation_log):
+        with open(conversation_log, 'w', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            writer.writerow(['datetime', 'user_input', 'ai_response', 'response_length'])
+
+def _log_hiroyuki_conversation(user_input: str, ai_response: str):
+    """ひろゆき会話をCSVに記録"""
+    try:
+        conversation_log = "/Users/yoshinomukanou/todo_app/simple_conversations.csv"
+        with open(conversation_log, 'a', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            writer.writerow([
+                datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                user_input,
+                ai_response,
+                len(ai_response)
+            ])
+    except Exception as e:
+        print(f"記録エラー: {e}")
+
+def get_hiroyuki_response(user_input: str) -> str:
+    """ユーザープロンプトのみでひろゆき風応答生成"""
+    # CSV初期化
+    _ensure_hiroyuki_csv_exists()
+    
+    try:
+        llm = ChatOpenAI(
+            temperature=0.7,
+            model="openai/gpt-3.5-turbo",
+            openai_api_base="https://openrouter.ai/api/v1",
+            openai_api_key=os.getenv("OPENROUTER_API_KEY")
+        )
+        
+        # ユーザープロンプトからひろゆき風指示を抽出
+        if any(keyword in user_input.lower() for keyword in ['オイラ', 'おいら', '論破', '敬語']):
+            # 具体的な指示がある場合はそれを活用
+            enhanced_prompt = f"""ひろゆき（西村博之）として回答してください。
+
+必須の話し方ルール:
+- 一人称は必ず「オイラ」または「おいら」を使用
+- 敬語で丁寧に話す（です・ます調）
+- 論理的で論破するような口調
+- 相手の前提や常識を疑う発言をする
+- 「〜っていうのは」「〜じゃないですか」などの語尾を使う
+
+ユーザーの質問/指示: {user_input}
+
+上記のルールを必ず守って、ひろゆきらしく回答してください。"""
+        else:
+            # 通常の場合はシンプルに
+            enhanced_prompt = f"""ひろゆきとして回答して。{user_input}"""
+        
+        response = llm.invoke([HumanMessage(content=enhanced_prompt)])
+        ai_response = response.content
+        
+        # 会話記録
+        _log_hiroyuki_conversation(user_input, ai_response)
+        
+        return ai_response
+        
+    except Exception as e:
+        error_response = f"それって、システムエラーってことですよね？ {str(e)} って意味不明じゃないですか？"
+        _log_hiroyuki_conversation(user_input, error_response)
+        return error_response
 
 
 # Google Calendarスコープ
@@ -218,36 +288,18 @@ def add_task_naturally(task_description: str) -> str:
                 current_year = datetime.datetime.now().year
                 due_date = f"{current_year}-{month.zfill(2)}-{day.zfill(2)}"
         
-        # タスク名をクリーンに
-        task_name = task_description
-        # 時期表現を除去
-        time_expressions = ["明日までに", "今日", "来週", "再来週", "2週間後", "来月"]
-        for expr in time_expressions:
-            task_name = task_name.replace(expr, "")
+        # LLMでタスク詳細を抽出
+        from task_extraction import extract_task_details_with_llm, parse_time_info_to_date
         
-        # 日付表現を除去
-        import re
-        task_name = re.sub(r'\d{4}年\d{1,2}月\d{1,2}日に?', '', task_name)
-        task_name = re.sub(r'\d{4}-\d{2}-\d{2}に?', '', task_name) 
-        task_name = re.sub(r'\d{1,2}/\d{1,2}に?', '', task_name)
+        task_name, time_info = extract_task_details_with_llm(task_description)
         
-        # 動作表現を除去
-        action_expressions = ["する", "やる", "を行う", "を実行"]
-        for expr in action_expressions:
-            if task_name.endswith(expr):
-                task_name = task_name[:-len(expr)]
+        # 抽出された時間情報から期限を設定（元の due_date より優先）
+        llm_due_date = parse_time_info_to_date(time_info)
+        if llm_due_date:
+            due_date = llm_due_date
         
-        # カレンダー関連表現をクリーンに
-        calendar_expressions = [
-            "をカレンダーに追加", "をスケジュールに入れる", "を予定に入れる",
-            "カレンダーに", "スケジュールに", "予定に", "を入れておいて", "と入れておいて",
-            "googleカレンダーに", "Googleカレンダーに"
-        ]
-        for expr in calendar_expressions:
-            task_name = task_name.replace(expr, "")
-        
-        task_name = task_name.strip()
-        if not task_name:
+        # タスク名が空の場合は元の文章を使用
+        if not task_name.strip():
             task_name = task_description
         
         # カレンダー連携の必要性を判定
@@ -361,6 +413,87 @@ def complete_task_naturally(task_hint: str) -> str:
     except Exception as e:
         return f"タスク完了エラー: {str(e)}"
 
+@tool
+def delete_task_naturally(task_hint: str) -> str:
+    """自然言語でタスクを削除する"""
+    try:
+        csv_file = "tasks.csv"
+        
+        # CSVファイル確認
+        if not os.path.exists(csv_file):
+            return "タスクファイルが見つかりません。"
+        
+        # 既存タスクを読み込み
+        tasks = []
+        with open(csv_file, 'r', encoding='utf-8') as file:
+            reader = csv.DictReader(file)
+            tasks = list(reader)
+        
+        if not tasks:
+            return "削除可能なタスクがありません。"
+        
+        # 削除対象のタスクを検索（あいまい検索）
+        task_hint_clean = task_hint.lower().replace("削除", "").replace("消す", "").replace("消して", "").replace("とって", "").replace("除く", "").strip()
+        
+        best_match = None
+        best_score = 0
+        
+        for idx, task in enumerate(tasks):
+            task_name = task['task_name'].lower()
+            if task_hint_clean in task_name or task_name in task_hint_clean:
+                score = len(set(task_hint_clean) & set(task_name)) / len(set(task_hint_clean) | set(task_name)) if task_hint_clean and task_name else 0
+                if score > best_score and score > 0.3:
+                    best_score = score
+                    best_match = idx
+        
+        if best_match is not None:
+            deleted_task = tasks[best_match]
+            deleted_task_name = deleted_task['task_name']
+            
+            # Googleカレンダーからも削除
+            calendar_result = ""
+            if deleted_task.get('calendar_event_id'):
+                try:
+                    # カレンダー削除処理（既存の認証ロジックを使用）
+                    creds = None
+                    token_file = "config/token.pickle"
+                    
+                    if os.path.exists(token_file):
+                        with open(token_file, 'rb') as token:
+                            creds = pickle.load(token)
+                    
+                    if creds and creds.valid:
+                        service = build('calendar', 'v3', credentials=creds)
+                        service.events().delete(calendarId='primary', eventId=deleted_task['calendar_event_id']).execute()
+                        calendar_result = " 📅 Googleカレンダーからも削除しました！"
+                    else:
+                        calendar_result = " (カレンダー認証が必要です)"
+                except Exception as e:
+                    calendar_result = f" (カレンダー削除エラー: {e})"
+            
+            # CSVから削除
+            tasks.pop(best_match)
+            
+            # CSV更新
+            with open(csv_file, 'w', newline='', encoding='utf-8') as file:
+                writer = csv.DictWriter(file, fieldnames=["task_name", "due_date", "status", "created_at", "calendar_event_id"])
+                writer.writeheader()
+                writer.writerows(tasks)
+            
+            return f"🗑️ タスク「{deleted_task_name}」を削除しました！{calendar_result}"
+        else:
+            # 候補を表示
+            result = "削除するタスクが特定できませんでした。現在のタスク一覧:\n"
+            for i, task in enumerate(tasks[:5], 1):
+                due_info = f" (期限: {task['due_date']})" if task['due_date'] else ""
+                status_info = "✅ 完了" if task['status'] == "done" else "📋 未完了"
+                result += f"{i}. {task['task_name']}{due_info} - {status_info}\n"
+            result += "\nより具体的なタスク名で指定してください。"
+            return result
+            
+    except Exception as e:
+        return f"タスク削除エラー: {str(e)}"
+
 class IntegratedLangChainAgent:
     """統合LangChainエージェント（全機能内包版）"""
     
@@ -382,10 +515,9 @@ class IntegratedLangChainAgent:
             self.llm_available = False
         
         # 利用可能なツールを統合（自然言語タスク管理を追加）
-        self.tools = [search_calendar_events, list_csv_tasks, add_task_naturally, complete_task_naturally]
+        self.tools = [search_calendar_events, list_csv_tasks, add_task_naturally, complete_task_naturally, delete_task_naturally]
         
         # 対話履歴記録（統合）
-        self.conversations_file = "ai_conversations.csv"
         
         # 簡易怒りシステム（統合）
         self.anger_stats_file = "anger_stats.json"
@@ -405,10 +537,12 @@ class IntegratedLangChainAgent:
 2. list_csv_tasks: CSVファイルからタスクリストを取得
 3. add_task_naturally: 自然言語でタスクを追加
 4. complete_task_naturally: 自然言語でタスクを完了
+5. delete_task_naturally: 自然言語でタスクを削除
 
 ユーザーの質問を分析して、必要なツールを実行し、結果を統合してわかりやすく回答してください。
 - タスクを追加したい場合：add_task_naturallyを使用
 - タスクを完了したい場合：complete_task_naturallyを使用
+- タスクを削除したい場合：delete_task_naturallyを使用
 - タスク一覧を見たい場合：list_csv_tasksを使用
 - 予定を確認したい場合：search_calendar_eventsを使用
 
@@ -421,55 +555,33 @@ class IntegratedLangChainAgent:
         try:
             # 怒るべきかどうかをキーワード検索でチェック
             if self._should_get_angry(user_input):
-                # 怒りモードを発動
-                # ユーザーインプットに対してメッセージとパターンをリターンで取得
-                anger_message, anger_pattern = self._get_anger_message(user_input)
+                # シンプルひろゆき風システムを使用
+                
+                # 未完了タスク数を取得
+                try:
+                    with open("tasks.csv", 'r', encoding='utf-8') as file:
+                        reader = csv.DictReader(file)
+                        incomplete_count = sum(1 for row in reader if row.get('status') == 'todo')
+                except:
+                    incomplete_count = 0
                 
                 print("\n" + "="*60)
-                print("🤖💢 AI怒りモード発動！")
-                print("="*60)
-                #　実際にリターンで返されたメッセージをprint
-                print(anger_message)
+                print("🤖💢 ひろゆき風AI怒りモード発動！")
                 print("="*60)
                 
-                # モチベーション効果のアンケート
-                print("\n📊 怒りモード効果アンケート")
-                print("今の怒り方はモチベーションアップにつながりましたか？")
-                
-                try:
-                    while True:
-                        motivation_feedback = input("a（良い） / b（悪い）: ").strip().lower()
-                        if motivation_feedback in ['a', 'b']:
-                            break
-                        print("aかbで答えてください。")
-                except EOFError:
-                    # 入力が終了した場合はデフォルトで'a'とする
-                    motivation_feedback = 'a'
-                    print("\n入力が終了したため、デフォルトで「a（良い）」として記録します。")
-                
-                # アンケート結果を記録
-                is_effective = (motivation_feedback == 'a')
-                self._record_anger_result(anger_pattern, is_effective)
-                
-                if is_effective:
-                    final_response = "ありがとうございます！この怒り方が効果的だったようですね。😊\n次回もこの調子で応援します！\n\n元の質問にお答えします：\n\n"
-                else:
-                    final_response = "そうでしたか...今度はもう少し優しく（または厳しく）アプローチしてみますね。😅\n\n元の質問にお答えします：\n\n"
+                # シンプルひろゆきチャットで応答生成
+                hiroyuki_input = f"ユーザーが{incomplete_count}個ものタスクを溜め込んでいます。{user_input}"
+                hiroyuki_response = get_hiroyuki_response(hiroyuki_input)
                 
                 # 元の質問を処理
+                print("\n" + "="*40)
+                print("元の質問への回答:")
+                print("="*40)
                 original_response = self._process_original_query(user_input)
-                final_response += original_response
                 
-                # 怒り込みでの対話記録
                 response_time = time.time() - start_time
-                self._log_conversation(
-                    user_input=user_input,
-                    ai_response=f"[怒りモード:{anger_pattern}] {anger_message} | [アンケート] {motivation_feedback} | [結果] {final_response}",
-                    tools_used=["anger_with_survey"],
-                    response_time=response_time
-                )
                 
-                return final_response
+                return f"ひろゆき風指摘: {hiroyuki_response}\n\n元の質問への回答:\n{original_response}"
             
             else:
                 # 🔥 STEP 2: 通常モード
@@ -479,14 +591,8 @@ class IntegratedLangChainAgent:
         except Exception as e:
             error_response = f"エラーが発生しました: {str(e)}"
             
-            # エラーも履歴に記録
+            # エラー時の処理
             response_time = time.time() - start_time
-            self._log_conversation(
-                user_input=user_input,
-                ai_response=error_response,
-                tools_used=[],
-                response_time=response_time
-            )
             
             return error_response
     
@@ -501,23 +607,69 @@ class IntegratedLangChainAgent:
         # 2. ツールを実行して結果を取得
         tool_results = self._execute_tools(tools_to_use)
         
-        # 3. LLMで結果を統合・回答生成
+        # 3. LLMで回答生成
+        # ひろゆき風に言葉の変換も実行
         response = self._generate_response(user_input, tool_results)
         
-        # 4. 対話履歴を記録
+        # 4. 対話履歴処理
         response_time = time.time() - start_time
-        tools_used = list(tool_results.keys()) if tool_results else []
-        self._log_conversation(
-            user_input=user_input,
-            ai_response=response,
-            tools_used=tools_used,
-            response_time=response_time
-        )
+        if not self._should_get_angry(user_input):
+            tools_used = list(tool_results.keys()) if tool_results else []
         
         return response
     
     def _analyze_query(self, query: str) -> Dict[str, bool]:
-        """クエリを分析して必要なツールを特定"""
+        """LLMを使ってクエリを分析し必要なツールを特定"""
+        if not self.llm:
+            # LLMがない場合はフォールバック（キーワードベース）
+            return self._fallback_keyword_analysis(query)
+        
+        try:
+            analysis_prompt = f"""
+以下のユーザーの質問を分析し、どのツールが必要かをJSONで回答してください。
+
+ユーザーの質問: "{query}"
+
+判定基準:
+- calendar: カレンダー情報の検索・表示が必要
+- tasks: タスク一覧の表示・確認が必要  
+- add_task: 新しいタスクやイベントの追加が必要
+- complete_task: 既存タスクの完了マークが必要
+- delete_task: タスクやイベントの削除が必要
+
+例:
+「明日までにレポートを書く」→ {{"calendar": false, "tasks": false, "add_task": true, "complete_task": false}}
+「今日の予定は？」→ {{"calendar": true, "tasks": false, "add_task": false, "complete_task": false}}
+「タスクの状況教えて」→ {{"calendar": false, "tasks": true, "add_task": false, "complete_task": false}}
+「プレゼン準備やった」→ {{"calendar": false, "tasks": false, "add_task": false, "complete_task": true}}
+「来週の火曜日3時からミーティングをカレンダーに追加」→ {{"calendar": false, "tasks": false, "add_task": true, "complete_task": false}}
+
+JSON形式のみで回答:
+"""
+            
+            from langchain_core.messages import HumanMessage
+            response = self.llm.invoke([HumanMessage(content=analysis_prompt)])
+            
+            # JSONパース試行
+            import json
+            try:
+                result = json.loads(response.content.strip())
+                # 必要なキーが全て存在するかチェック
+                required_keys = ['calendar', 'tasks', 'add_task', 'complete_task', 'delete_task']
+                if all(key in result for key in required_keys):
+                    return result
+            except json.JSONDecodeError:
+                pass
+                
+            # JSON解析失敗時はフォールバック
+            return self._fallback_keyword_analysis(query)
+            
+        except Exception as e:
+            print(f"LLM分析エラー: {e}")
+            return self._fallback_keyword_analysis(query)
+    
+    def _fallback_keyword_analysis(self, query: str) -> Dict[str, bool]:
+        """フォールバック用キーワードベース分析"""
         query_lower = query.lower()
         
         # キーワードベースで判定
@@ -525,6 +677,7 @@ class IntegratedLangChainAgent:
         needs_tasks = any(kw in query_lower for kw in ['タスク', 'やること', 'todo', '未完了', '状況', '一覧'])
         needs_add = any(kw in query_lower for kw in ['追加', '作る', 'する', 'やる', '登録', 'までに', '入れる', '入れて', 'いれて', 'セットして', 'set'])
         needs_complete = any(kw in query_lower for kw in ['完了', '終わった', 'やった', 'できた', '済んだ'])
+        needs_delete = any(kw in query_lower for kw in ['削除', '消す', '消して', 'とって', '除く', '取り消す'])
         
         # カレンダー＋追加の組み合わせは明確にタスク追加
         if needs_calendar and needs_add:
@@ -532,18 +685,20 @@ class IntegratedLangChainAgent:
                 'calendar': False,
                 'tasks': False,
                 'add_task': True,
-                'complete_task': False
+                'complete_task': False,
+                'delete_task': False
             }
         
         # どちらも明確でない場合は両方
-        if not any([needs_calendar, needs_tasks, needs_add, needs_complete]):
+        if not any([needs_calendar, needs_tasks, needs_add, needs_complete, needs_delete]):
             needs_calendar = needs_tasks = True
         
         return {
             'calendar': needs_calendar,
             'tasks': needs_tasks,
             'add_task': needs_add,
-            'complete_task': needs_complete
+            'complete_task': needs_complete,
+            'delete_task': needs_delete
         }
     
     def _execute_tools(self, tools_to_use: Dict[str, bool]) -> Dict[str, str]:
@@ -564,6 +719,8 @@ class IntegratedLangChainAgent:
                 results['add_task'] = "PENDING"
             if tools_to_use['complete_task']:
                 results['complete_task'] = "PENDING"
+            if tools_to_use['delete_task']:
+                results['delete_task'] = "PENDING"
                 
         except Exception as e:
             results['error'] = f"ツール実行エラー: {str(e)}"
@@ -572,18 +729,30 @@ class IntegratedLangChainAgent:
     
     def _generate_response(self, user_input: str, tool_results: Dict[str, str]) -> str:
         """LLMで結果を統合して回答生成"""
-        # 自然言語タスク操作が必要な場合は直接実行
+        # 自然言語タスク操作が必要な場合は直接実行してからひろゆき風に変換
         if tool_results.get('add_task') == "PENDING":
             try:
-                return add_task_naturally.func(user_input)
+                original_result = add_task_naturally.func(user_input)
+                return self._simple_hiroyuki_convert(original_result, user_input)
             except Exception as e:
-                return f"タスク追加エラー: {str(e)}"
+                error_msg = f"タスク追加エラー: {str(e)}"
+                return self._simple_hiroyuki_convert(error_msg, user_input)
         
         if tool_results.get('complete_task') == "PENDING":
             try:
-                return complete_task_naturally.func(user_input)
+                original_result = complete_task_naturally.func(user_input)
+                return self._simple_hiroyuki_convert(original_result, user_input)
             except Exception as e:
-                return f"タスク完了エラー: {str(e)}"
+                error_msg = f"タスク完了エラー: {str(e)}"
+                return self._simple_hiroyuki_convert(error_msg, user_input)
+        
+        if tool_results.get('delete_task') == "PENDING":
+            try:
+                original_result = delete_task_naturally.func(user_input)
+                return self._simple_hiroyuki_convert(original_result, user_input)
+            except Exception as e:
+                error_msg = f"タスク削除エラー: {str(e)}"
+                return self._simple_hiroyuki_convert(error_msg, user_input)
         
         # ツール結果をまとめる
         context = ""
@@ -604,20 +773,59 @@ class IntegratedLangChainAgent:
         if self.llm_available:
             try:
                 response = self.llm.invoke(messages)
-                return response.content
+                original_response = response.content
+                
+                # シンプルひろゆき風に変換
+                hiroyuki_response = self._simple_hiroyuki_convert(original_response)
+                
+                
+                return hiroyuki_response
+                
             except Exception as e:
                 # フォールバック
                 if context:
-                    return f"以下の情報が取得できました：\n\n{context}"
+                    fallback_response = f"以下の情報が取得できました：\n\n{context}"
                 else:
-                    return "申し訳ございませんが、情報を取得できませんでした。"
+                    fallback_response = "申し訳ございませんが、情報を取得できませんでした。"
+                
+                # フォールバックもひろゆき風に
+                hiroyuki_fallback = self._simple_hiroyuki_convert(fallback_response)
+                return hiroyuki_fallback
         else:
-            # LLMなしの場合はシンプルに情報を返す
+            # LLMなしの場合もひろゆき風に
             if context:
-                return f"📋 取得した情報:\n\n{context}"
+                original = f"📋 取得した情報:\n\n{context}"
             else:
-                return "LLMが利用できないため、シンプルな応答モードです。タスク操作は引き続き利用できます。"
+                original = "LLMが利用できないため、シンプルな応答モードです。タスク操作は引き続き利用できます。"
+            
+            hiroyuki_response = self._simple_hiroyuki_convert(original)
+            return hiroyuki_response
     
+    def _simple_hiroyuki_convert(self, original_response: str, user_context: str = "") -> str:
+        """シンプルひろゆき風変換（ユーザープロンプトのみ）"""
+        try:
+            # ユーザーの指示から特定キーワードをチェック
+            if user_context and any(keyword in user_context.lower() for keyword in ['オイラ', 'おいら', '論破', '敬語']):
+                conversion_input = f"""ひろゆき（西村博之）として回答してください。
+
+必須の話し方ルール:
+- 一人称は必ず「オイラ」または「おいら」を使用
+- 敬語で丁寧に話す（です・ます調）
+- 論理的で論破するような口調
+- 「〜っていうのは」「〜じゃないですか」などの語尾を使う
+
+以下の内容を上記のルールに従ってひろゆき風に変換してください:
+{original_response}"""
+            else:
+                conversion_input = f"以下の内容をひろゆき風に変換してください: {original_response}"
+                
+            return get_hiroyuki_response(conversion_input)
+            
+        except Exception as e:
+            # 変換失敗時のフォールバック
+            return f"おいらとしては、{original_response}って感じですよね。まあ、普通の人はそう思うんじゃないですか？"
+    
+
     # 🤖 統合された怒りシステム
     def _should_get_angry(self, user_input: str) -> bool:
         """怒るべきかどうか判定（明確な条件のみ）"""
@@ -699,59 +907,25 @@ class IntegratedLangChainAgent:
         except Exception as e:
             print(f"統計保存エラー: {e}")
     
-    def _log_conversation(self, user_input: str, ai_response: str, tools_used: List[str], response_time: float) -> None:
-        """対話履歴記録"""
-        try:
-            session_id = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            
-            # CSVヘッダーチェック・作成
-            file_exists = os.path.exists(self.conversations_file)
-            
-            with open(self.conversations_file, 'a', newline='', encoding='utf-8') as file:
-                fieldnames = ['session_id', 'timestamp', 'user_input', 'ai_response', 'conversation_type', 'tools_used', 'response_time']
-                writer = csv.DictWriter(file, fieldnames=fieldnames)
-                
-                if not file_exists:
-                    writer.writeheader()
-                
-                writer.writerow({
-                    'session_id': session_id,
-                    'timestamp': timestamp,
-                    'user_input': user_input,
-                    'ai_response': ai_response,
-                    'conversation_type': 'general_query',
-                    'tools_used': ','.join(tools_used) if tools_used else '',
-                    'response_time': f'{response_time:.2f}s'
-                })
-        except Exception as e:
-            print(f"対話履歴記録エラー: {e}")
     
     def get_simple_anger_report(self) -> str:
-        """AIモチベーション効果レポート"""
-        gentle_rate = self._get_success_rate("gentle")
-        direct_rate = self._get_success_rate("direct")
+        """ひろゆきモード効果レポート"""
+        hiroyuki_rate = self._get_success_rate("hiroyuki")
+        hiroyuki_total = self.anger_stats.get("hiroyuki", {}).get("total", 0)
         
-        gentle_total = self.anger_stats["gentle"]["total"]
-        direct_total = self.anger_stats["direct"]["total"]
-        
-        report = "📊 AIモチベーション効果分析レポート\n"
+        report = "📊 ひろゆき風AI効果分析レポート\n"
         report += "="*40 + "\n"
-        report += f"😊 優しい怒り: モチベーション効果{gentle_rate:.1%} ({gentle_total}回実施)\n"
-        report += f"😤 直接的怒り: モチベーション効果{direct_rate:.1%} ({direct_total}回実施)\n"
+        report += f"🤔 ひろゆきらしさ: {hiroyuki_rate:.1%} ({hiroyuki_total}回使用)\n"
         
-        if gentle_total > 0 and direct_total > 0:
-            if gentle_rate > direct_rate:
-                report += "\n💡 優しい怒り方の方がモチベーションアップ効果が高いです！"
-                report += "\n🎯 次回は優しいアプローチを採用します。"
-            elif direct_rate > gentle_rate:
-                report += "\n💡 直接的な怒り方の方がモチベーションアップ効果が高いです！"
-                report += "\n🎯 次回は直接的アプローチを採用します。"
+        if hiroyuki_total > 0:
+            if hiroyuki_rate >= 0.7:
+                report += "\n🎆 結果: ひろゆきらしさが高度に再現されています！"
+            elif hiroyuki_rate >= 0.5:
+                report += "\n📈 結果: まあまあひろゆきっぽいですね"
             else:
-                report += "\n💡 どちらも同程度のモチベーション効果です。"
-                report += "\n🎯 引き続きバランス良く使い分けます。"
+                report += "\n🤔 結果: まだひろゆきらしさが足りないですね"
         else:
-            report += "\n💡 データ蓄積中... より多くのフィードバックをお待ちしています！"
+            report += "\n📈 まだデータが不十分です"
         
         return report
 
@@ -760,12 +934,6 @@ def integrated_langchain_mode() -> None:
     """統合LangChainモードのメイン処理"""
     print("\n=== 統合LangChain高機能自然言語モード ===")
     print("LangChainを使ってカレンダーとタスクの情報を検索してお答えします。")
-    print("📋 未完了タスクが5個以上だとAIが怒ることがあります...")
-    print("")
-    print("💡 新機能:")
-    print("  • 「明日までにレポート書く」→ タスク追加")
-    print("  • 「サッカーやった」→ タスク完了")
-    print("  • 「タスク状況教えて」→ 一覧表示")
     print("")
     print("'戻る'と入力すると通常モードに戻ります。\n")
     
@@ -783,6 +951,7 @@ def integrated_langchain_mode() -> None:
     except Exception as e:
         print(f"❌ エージェント初期化エラー: {e}")
         return
+    
     
     # 対話ループ
     # 何がTrueの間？
@@ -809,6 +978,7 @@ def integrated_langchain_mode() -> None:
         
         # agentインスタンスのprocess_queryメソッドをを呼び出している
         response = agent.process_query(user_input)
+        
         print(f"\n🤖 **回答**:\n{response}\n")
         print("-" * 60)
 
