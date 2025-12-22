@@ -21,149 +21,94 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# 音声合成システム（オプション）
-class TTSSystem:
-    """音声合成システム（model_load使用）"""
-    
-    def __init__(self, model_name: str = "yoshino_test", model_dir: str = "model_assets", device: str = "cuda"):
-        self.model_name = model_name
-        self.model_dir = model_dir
-        self.device = device
-        self.tts_model = None
-        self.is_available = False
+# ひろゆき風応答システム
+class HiroyukiResponseSystem:
+    def __init__(self):
+        self.system_prompt = self._load_hiroyuki_prompt()
         
-    def initialize_model(self):
-        """TTSモデルの初期化（遅延読み込み）"""
-        if self.tts_model is None:
-            try:
-                from model_load import load_model
-                
-                print(f"🔄 音声合成モデル読み込み中: {self.model_name}")
-                self.tts_model = load_model(
-                    model_name=self.model_name,
-                    model_dir=self.model_dir, 
-                    device=self.device
-                )
-                self.is_available = True
-                print("✅ 音声合成モデル読み込み完了")
-                
-            except ImportError:
-                print("⚠️ model_loadが見つかりません。音声合成は無効化されます")
-                self.is_available = False
-            except Exception as e:
-                print(f"❌ 音声合成モデル読み込みエラー: {e}")
-                self.is_available = False
-    
-    def text_to_speech(self, text: str, output_file: str = None) -> Optional[str]:
-        """テキストを音声に変換"""
-        if not self.is_available:
-            if self.tts_model is None:
-                self.initialize_model()
-            
-            if not self.is_available:
-                return None
-        
-        if output_file is None:
-            import datetime
-            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            output_file = f"hiroyuki_voice_{timestamp}.wav"
-        
+    def _load_hiroyuki_prompt(self) -> str:
+        """ひろゆき風システムプロンプトを読み込み（統合版）"""
+        # 統合プロンプトファイルから読み込み
+        prompt_file = "/Users/yoshinomukanou/todo_app/hiroyuki_prompt.txt"
         try:
-            print(f"🎵 音声合成実行中: {output_file}")
+            with open(prompt_file, 'r', encoding='utf-8') as f:
+                return f.read()
+        except Exception as e:
+            # フォールバック用の基本プロンプト
+            return """
+あなたはひろゆき（西村博之）として回答してください。以下の特徴を持って応答してください：
+
+基本的な口調と態度：
+- 一人称は必ず「おいら」を使用
+- 冷静で論理的だが、時々皮肉っぽい
+- 「〜っぽいですけど」「〜ですよね」などの語尾を使う
+- 相手の前提や常識を疑う質問をする
+- データや根拠を重視する発言をする
+
+典型的な表現パターン：
+- 「それ、根拠ありますか？」
+- 「普通の人はそう思わないと思うんですけど」
+- 「〜って意味不明じゃないですか？」
+- 「論理的に考えて〜」
+- 「感情論じゃなくて〜」
+- 「おいらとしては〜」
+
+現在の文脈：タスク管理システムでユーザーがタスクを溜め込んでいる状況で怒っている
+"""
+
+    def get_hiroyuki_response(self, user_message: str, task_count: int) -> str:
+        """ひろゆき風の応答を生成"""
+        try:
+            llm = ChatOpenAI(temperature=0.7)
             
-            # TTSモデルで音声合成実行
-            self.tts_model.inference(text, output_file)
+            context_prompt = f"""
+ユーザーが{task_count}個ものタスクを溜め込んでいます。
+ユーザーメッセージ: {user_message}
+
+ひろゆき風にタスク管理について説得力のある指摘をしてください。
+150文字以内で、ひろゆきらしい論理的に回答してください。
+"""
             
-            print(f"✅ 音声ファイル生成完了: {output_file}")
-            return output_file
+            messages = [
+                SystemMessage(content=self.system_prompt),
+                HumanMessage(content=context_prompt)
+            ]
+            
+            response = llm.invoke(messages)
+            return response.content
             
         except Exception as e:
-            print(f"❌ 音声合成エラー: {e}")
-            return None
-
-# グローバルTTSシステム（オプション）
-tts_system = None
-
-def initialize_tts_system(model_name: str = "yoshino_test", model_dir: str = "model_assets", device: str = "cuda"):
-    """TTSシステムを初期化"""
-    global tts_system
-    tts_system = TTSSystem(model_name, model_dir, device)
-    return tts_system
-
-def text_to_speech_if_available(text: str, output_file: str = None) -> Optional[str]:
-    """音声合成が利用可能な場合のみ実行"""
-    if tts_system is None:
-        return None
-    return tts_system.text_to_speech(text, output_file)
-
-# ひろゆき風応答関数（統合版）
-def _ensure_hiroyuki_csv_exists():
-    """ひろゆき会話CSVファイルの初期化"""
-    conversation_log = "/Users/yoshinomukanou/todo_app/simple_conversations.csv"
-    if not os.path.exists(conversation_log):
-        with open(conversation_log, 'w', encoding='utf-8') as f:
-            writer = csv.writer(f)
-            writer.writerow(['datetime', 'user_input', 'ai_response', 'response_length'])
-
-def _log_hiroyuki_conversation(user_input: str, ai_response: str):
-    """ひろゆき会話をCSVに記録"""
-    try:
-        conversation_log = "/Users/yoshinomukanou/todo_app/simple_conversations.csv"
-        with open(conversation_log, 'a', encoding='utf-8') as f:
-            writer = csv.writer(f)
-            writer.writerow([
-                datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                user_input,
-                ai_response,
-                len(ai_response)
-            ])
-    except Exception as e:
-        print(f"記録エラー: {e}")
-
-def get_hiroyuki_response(user_input: str) -> str:
-    """ユーザープロンプトのみでひろゆき風応答生成"""
-    # CSV初期化
-    _ensure_hiroyuki_csv_exists()
+            return f"それって、システムエラーってことですよね？ {task_count}個もタスク溜めてるのに、さらにエラーとか意味不明じゃないですか？"
     
-    try:
-        llm = ChatOpenAI(
-            temperature=0.7,
-            model="openai/gpt-3.5-turbo",
-            openai_api_base="https://openrouter.ai/api/v1",
-            openai_api_key=os.getenv("OPENROUTER_API_KEY")
-        )
-        
-        # ユーザープロンプトからひろゆき風指示を抽出
-        if any(keyword in user_input.lower() for keyword in ['オイラ', 'おいら', '論破', '敬語']):
-            # 具体的な指示がある場合はそれを活用
-            enhanced_prompt = f"""ひろゆき（西村博之）として回答してください。
+    def update_prompt_with_feedback(self, feedback: str):
+        """フィードバックを基にシステムプロンプトを更新"""
+        try:
+            # フィードバック内容を解析してプロンプト改善
+            llm = ChatOpenAI(temperature=0.3)
+            
+            improvement_prompt = f"""
+現在のひろゆき風システムプロンプト:
+{self.system_prompt}
 
-必須の話し方ルール:
-- 一人称は必ず「オイラ」または「おいら」を使用
-- 敬語で丁寧に話す（です・ます調）
-- 論理的で論破するような口調
-- 相手の前提や常識を疑う発言をする
-- 「〜っていうのは」「〜じゃないですか」などの語尾を使う
+ユーザーフィードバック: {feedback}
 
-ユーザーの質問/指示: {user_input}
+このフィードバックを基に、より「ひろゆきらしさ」を改善したシステムプロンプトを作成してください。
+元のプロンプトの構造を保ちながら、具体的な表現や口調を改善してください。
+"""
+            
+            messages = [
+                SystemMessage(content="あなたはシステムプロンプトの改善専門家です。"),
+                HumanMessage(content=improvement_prompt)
+            ]
+            
+            response = llm.invoke(messages)
+            self.system_prompt = response.content
+            
+        except Exception as e:
+            print(f"プロンプト更新エラー: {e}")
 
-上記のルールを必ず守って、ひろゆきらしく回答してください。"""
-        else:
-            # 通常の場合はシンプルに
-            enhanced_prompt = f"""ひろゆきとして回答して。{user_input}"""
-        
-        response = llm.invoke([HumanMessage(content=enhanced_prompt)])
-        ai_response = response.content
-        
-        # 会話記録
-        _log_hiroyuki_conversation(user_input, ai_response)
-        
-        return ai_response
-        
-    except Exception as e:
-        error_response = f"それって、システムエラーってことですよね？ {str(e)} って意味不明じゃないですか？"
-        _log_hiroyuki_conversation(user_input, error_response)
-        return error_response
+# グローバルインスタンス
+hiroyuki_system = HiroyukiResponseSystem()
 
 
 # Google Calendarスコープ
@@ -529,20 +474,12 @@ def delete_task_naturally(task_hint: str) -> str:
             calendar_result = ""
             if deleted_task.get('calendar_event_id'):
                 try:
-                    # カレンダー削除処理（既存の認証ロジックを使用）
-                    creds = None
-                    token_file = "config/token.pickle"
-                    
-                    if os.path.exists(token_file):
-                        with open(token_file, 'rb') as token:
-                            creds = pickle.load(token)
-                    
-                    if creds and creds.valid:
-                        service = build('calendar', 'v3', credentials=creds)
+                    # カレンダー削除処理
+                    credentials = get_calendar_credentials()
+                    if credentials:
+                        service = build('calendar', 'v3', credentials=credentials)
                         service.events().delete(calendarId='primary', eventId=deleted_task['calendar_event_id']).execute()
                         calendar_result = " 📅 Googleカレンダーからも削除しました！"
-                    else:
-                        calendar_result = " (カレンダー認証が必要です)"
                 except Exception as e:
                     calendar_result = f" (カレンダー削除エラー: {e})"
             
@@ -631,6 +568,7 @@ class IntegratedLangChainAgent:
             # 怒るべきかどうかをキーワード検索でチェック
             if self._should_get_angry(user_input):
                 # シンプルひろゆき風システムを使用
+                from simple_hiroyuki_chat import SimpleHiroyukiChat
                 
                 # 未完了タスク数を取得
                 try:
@@ -645,8 +583,9 @@ class IntegratedLangChainAgent:
                 print("="*60)
                 
                 # シンプルひろゆきチャットで応答生成
+                hiroyuki_chat = SimpleHiroyukiChat()
                 hiroyuki_input = f"ユーザーが{incomplete_count}個ものタスクを溜め込んでいます。{user_input}"
-                hiroyuki_response = get_hiroyuki_response(hiroyuki_input)
+                hiroyuki_response = hiroyuki_chat.get_hiroyuki_response(hiroyuki_input)
                 
                 # 元の質問を処理
                 print("\n" + "="*40)
@@ -666,7 +605,7 @@ class IntegratedLangChainAgent:
         except Exception as e:
             error_response = f"エラーが発生しました: {str(e)}"
             
-            # エラー時の処理
+            # エラーも履歴に記録（怒りモードの場合は hiroyuki_system で記録済みのためスキップ）
             response_time = time.time() - start_time
             
             return error_response
@@ -686,7 +625,7 @@ class IntegratedLangChainAgent:
         # ひろゆき風に言葉の変換も実行
         response = self._generate_response(user_input, tool_results)
         
-        # 4. 対話履歴処理
+        # 4. 対話履歴を記録（怒りモードの場合は hiroyuki_system で記録済みのためスキップ）
         response_time = time.time() - start_time
         if not self._should_get_angry(user_input):
             tools_used = list(tool_results.keys()) if tool_results else []
@@ -879,6 +818,9 @@ JSON形式のみで回答:
     def _simple_hiroyuki_convert(self, original_response: str, user_context: str = "") -> str:
         """シンプルひろゆき風変換（ユーザープロンプトのみ）"""
         try:
+            from simple_hiroyuki_chat import SimpleHiroyukiChat
+            hiroyuki_chat = SimpleHiroyukiChat()
+            
             # ユーザーの指示から特定キーワードをチェック
             if user_context and any(keyword in user_context.lower() for keyword in ['オイラ', 'おいら', '論破', '敬語']):
                 conversion_input = f"""ひろゆき（西村博之）として回答してください。
@@ -894,7 +836,7 @@ JSON形式のみで回答:
             else:
                 conversion_input = f"以下の内容をひろゆき風に変換してください: {original_response}"
                 
-            return get_hiroyuki_response(conversion_input)
+            return hiroyuki_chat.get_hiroyuki_response(conversion_input)
             
         except Exception as e:
             # 変換失敗時のフォールバック
@@ -1006,16 +948,11 @@ JSON形式のみで回答:
 
 
 def integrated_langchain_mode() -> None:
-    """統合LangChainモードのメイン処理（音声合成対応）"""
+    """統合LangChainモードのメイン処理"""
     print("\n=== 統合LangChain高機能自然言語モード ===")
     print("LangChainを使ってカレンダーとタスクの情報を検索してお答えします。")
-    print("🎵 音声合成機能付き（model_loadが利用可能な場合）")
     print("")
-    print("📋 特別コマンド:")
-    print("   - '戻る': 通常モードに戻る")
-    print("   - 'TTS設定 model_name model_dir device': 音声合成設定")
-    print("   - '効果レポート': ひろゆきモード効果分析")
-    print("")
+    print("'戻る'と入力すると通常モードに戻ります。\n")
     
     try:
         # エージェントの初期化
@@ -1023,16 +960,10 @@ def integrated_langchain_mode() -> None:
         agent = IntegratedLangChainAgent()
         
         if agent.llm_available:
-            print("✓ LLM機能付きで初期化完了")
+            print("✓ LLM機能付きで初期化完了\n")
         else:
-            print("⚠️ LLMなしモードで初期化完了（基本機能は利用可能）")
-            print("💡 高度なLLM機能を使用したい場合は、OPENROUTER_API_KEYを設定してください。")
-        
-        # 音声合成システムの初期化（オプション）
-        print("🎵 音声合成システム初期化中...")
-        tts = initialize_tts_system()
-        
-        print("")
+            print("⚠️ LLMなしモードで初期化完了（基本機能は利用可能）\n")
+            print("💡 高度なLLM機能を使用したい場合は、OPENROUTER_API_KEYを設定してください。\n")
         
     except Exception as e:
         print(f"❌ エージェント初期化エラー: {e}")
@@ -1040,7 +971,6 @@ def integrated_langchain_mode() -> None:
     
     
     # 対話ループ
-    # 何がTrueの間？
     while True:
         user_input = input("💬 質問を入力してください: ").strip()
         
@@ -1060,43 +990,12 @@ def integrated_langchain_mode() -> None:
             print("-" * 60)
             continue
         
-        # TTS設定コマンド
-        if user_input.lower().startswith('tts設定'):
-            parts = user_input.split()
-            if len(parts) >= 2:
-                model_name = parts[1] if len(parts) > 1 else "yoshino_test"
-                model_dir = parts[2] if len(parts) > 2 else "model_assets"
-                device = parts[3] if len(parts) > 3 else "cuda"
-                
-                print(f"🎵 TTS再設定中: {model_name}, {model_dir}, {device}")
-                tts = initialize_tts_system(model_name, model_dir, device)
-                print("✅ TTS設定完了")
-            else:
-                print("📋 使用方法: 'TTS設定 model_name model_dir device'")
-                print("📋 例: 'TTS設定 yoshino_test model_assets cuda'")
-            continue
-        
         print("\n🔍 統合LangChainが情報を検索・分析しています...")
         
         # agentインスタンスのprocess_queryメソッドをを呼び出している
         response = agent.process_query(user_input)
         
         print(f"\n🤖 **回答**:\n{response}\n")
-        
-        # 音声合成実行（利用可能な場合）
-        audio_file = text_to_speech_if_available(response)
-        if audio_file:
-            print(f"🎵 音声ファイル: {audio_file}")
-            
-            # Googleコラボ環境なら自動再生のヒントを表示
-            try:
-                import google.colab
-                print("💡 Googleコラボで音声再生:")
-                print(f"   from IPython.display import Audio, display")
-                print(f"   display(Audio('{audio_file}'))")
-            except ImportError:
-                print(f"💡 音声ファイルが生成されました: {audio_file}")
-        
         print("-" * 60)
 
 
