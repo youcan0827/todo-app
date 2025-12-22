@@ -625,7 +625,7 @@ class IntegratedLangChainAgent:
         # ひろゆき風に言葉の変換も実行
         response = self._generate_response(user_input, tool_results)
         
-        # 4. 対話履歴を記録（怒りモードの場合は hiroyuki_system で記録済みのためスキップ）
+        # 4. 対話履歴を記録
         response_time = time.time() - start_time
         if not self._should_get_angry(user_input):
             tools_used = list(tool_results.keys()) if tool_results else []
@@ -948,11 +948,27 @@ JSON形式のみで回答:
 
 
 def integrated_langchain_mode() -> None:
-    """統合LangChainモードのメイン処理"""
-    print("\n=== 統合LangChain高機能自然言語モード ===")
+    """統合LangChainモードのメイン処理（音声機能付き）"""
+    print("\n=== 統合LangChain高機能自然言語モード（音声付き） ===")
     print("LangChainを使ってカレンダーとタスクの情報を検索してお答えします。")
+    print("🎵 AIの応答を音声でも再生します！")
     print("")
     print("'戻る'と入力すると通常モードに戻ります。\n")
+    
+    # 音声モデルの初期化
+    voice_model = None
+    try:
+        print("🎵 音声モデルを初期化中...")
+        from model_load import load_model
+        voice_model = load_model(
+            model_name="yoshino_test",
+            model_dir="model_assets",
+            device="cuda"
+        )
+        print("✓ 音声モデル初期化完了\n")
+    except Exception as e:
+        print(f"⚠️ 音声モデル初期化エラー: {e}")
+        print("💡 音声なしで続行します\n")
     
     try:
         # エージェントの初期化
@@ -996,6 +1012,29 @@ def integrated_langchain_mode() -> None:
         response = agent.process_query(user_input)
         
         print(f"\n🤖 **回答**:\n{response}\n")
+        
+        # 音声生成と再生
+        if voice_model:
+            try:
+                # AIの出力をai_voice変数に格納
+                ai_voice = response
+                
+                print("🎵 音声を生成中...")
+                # 音声生成（指定されたコードそのまま）
+                voice_model.inference(ai_voice, "out.wav")
+                
+                # 音声再生
+                print("🔊 音声を再生します...")
+                try:
+                    from IPython.display import Audio, display
+                    display(Audio("out.wav"))
+                except ImportError:
+                    print("⚠️ Jupyter環境ではないため音声再生をスキップします")
+                    print("💡 out.wavファイルが生成されました")
+                    
+            except Exception as e:
+                print(f"⚠️ 音声生成エラー: {e}")
+        
         print("-" * 60)
 
 
