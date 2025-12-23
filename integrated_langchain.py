@@ -948,6 +948,63 @@ JSON形式のみで回答:
 
 
 # GoogleColab環境専用音声機能
+def setup_drive_and_find_model_dir(default_model_dir: str = "model_assets", model_name: str = "yoshino_test") -> Optional[str]:
+    """Googleドライブをマウントしてモデルディレクトリを検索"""
+    try:
+        # Googleドライブをマウント
+        from google.colab import drive
+        import os
+        
+        drive_mount_point = "/content/drive"
+        if not os.path.exists(drive_mount_point):
+            print("📁 Googleドライブをマウント中...")
+            drive.mount(drive_mount_point)
+            print("✓ Googleドライブがマウントされました")
+        
+        # 可能性のあるモデルパス候補
+        possible_paths = [
+            f"{drive_mount_point}/MyDrive/{default_model_dir}",
+            f"{drive_mount_point}/MyDrive/model_assets",
+            f"{drive_mount_point}/MyDrive/models",
+            f"{drive_mount_point}/MyDrive/voice_models",
+            f"{drive_mount_point}/MyDrive/AI_models/{default_model_dir}",
+            f"/content/{default_model_dir}",  # ローカルアップロード
+            default_model_dir  # 元のパス
+        ]
+        
+        print("🔍 モデルディレクトリを検索中...")
+        for path in possible_paths:
+            print(f"  チェック中: {path}")
+            if os.path.exists(path):
+                # モデルファイルの存在も確認
+                model_subdir = os.path.join(path, model_name)
+                if os.path.exists(model_subdir):
+                    print(f"✓ モデルディレクトリが見つかりました: {path}")
+                    return path
+                else:
+                    print(f"  ⚠️ {path}は存在しますが、{model_name}フォルダが見つかりません")
+        
+        # 見つからない場合は手動アップロード案内
+        print("❌ モデルディレクトリが見つかりませんでした")
+        print("\n📋 解決方法:")
+        print("1. Googleドライブのマイドライブに 'model_assets' フォルダを作成")
+        print("2. その中に音声モデル（yoshino_testフォルダ）をアップロード")
+        print("3. または、Colabの左サイドバーからファイルを直接アップロード")
+        print("\n💡 ドライブの構造例:")
+        print("   MyDrive/")
+        print("   ├── model_assets/")
+        print("   │   └── yoshino_test/")
+        print("   │       ├── config.json")
+        print("   │       ├── model.pth")
+        print("   │       └── style_vectors.npy")
+        
+        return None
+        
+    except Exception as e:
+        print(f"❌ ドライブマウントエラー: {e}")
+        return None
+
+
 def is_colab_environment() -> bool:
     """GoogleColab環境かどうかを判定"""
     try:
@@ -966,12 +1023,17 @@ def initialize_tts_system(model_name: str = "yoshino_test", model_dir: str = "mo
         return None
     
     try:
+        # Googleドライブをマウントしてモデルパスを検索
+        model_dir = setup_drive_and_find_model_dir(model_dir, model_name)
+        if model_dir is None:
+            return None
+            
         # model_loadモジュールの存在確認
         import importlib.util
         spec = importlib.util.find_spec("model_load")
         if spec is None:
             print("⚠️ model_loadモジュールが見つかりません")
-            print("💡 GoogleColabでモデルファイルをアップロードしてください")
+            print("💡 GoogleColabでmodel_load.pyをアップロードしてください")
             return None
             
         # style_bert_vits2の存在確認
@@ -979,13 +1041,6 @@ def initialize_tts_system(model_name: str = "yoshino_test", model_dir: str = "mo
         if spec is None:
             print("⚠️ style_bert_vits2ライブラリがインストールされていません")
             print("💡 Colabで !pip install style-bert-vits2 を実行してください")
-            return None
-        
-        # モデルディレクトリの存在確認
-        import os
-        if not os.path.exists(model_dir):
-            print(f"⚠️ モデルディレクトリが見つかりません: {model_dir}")
-            print("💡 Colabにモデルファイルをアップロードしてください")
             return None
         
         # Colab環境でのデバイス設定（GPU優先）
