@@ -1017,7 +1017,7 @@ def is_colab_environment() -> bool:
 
 
 def initialize_tts_system(model_name: str = "yoshino_test", model_dir: str = "model_assets", device: str = "auto") -> Optional[object]:
-    """音声合成システムの初期化（GoogleColab専用）"""
+    """音声合成システムの初期化（バックグラウンドTTSサーバー対応）"""
     # GoogleColab環境チェック
     if not is_colab_environment():
         print("⚠️ 音声機能はGoogleColab環境でのみ利用可能です")
@@ -1052,25 +1052,16 @@ def initialize_tts_system(model_name: str = "yoshino_test", model_dir: str = "mo
         update_dict()
         print("✓ 辞書データ適用完了")
         
-        # model_loadモジュールの確認（オプション）
-        spec = importlib.util.find_spec("model_load")
-        if spec is None:
-            print("⚠️ model_loadモジュールが見つかりません")
-            print("💡 内蔵のStyle-Bert-VITS2機能を使用します")
-            
-            # Style-Bert-VITS2のネイティブ機能を使用
-            return initialize_native_tts_system(model_dir, model_name, device)
+        # バックグラウンドTTSサーバーを起動
+        print("🚀 バックグラウンドTTSサーバーを起動中...")
+        tts_server = start_background_tts_server(model_dir, model_name, device)
+        
+        if tts_server:
+            print("✓ バックグラウンドTTSサーバー起動完了")
+            return tts_server
         else:
-            # 既存のmodel_loadを使用
-            print("💡 既存のmodel_loadモジュールを使用します")
-            from model_load import load_model
-            voice_model = load_model(
-                model_name=model_name,
-                model_dir=model_dir,
-                device=device,
-                cpu=(device == "cpu")
-            )
-            return voice_model
+            print("⚠️ バックグラウンドTTSサーバーの起動に失敗しました")
+            return None
         
     except ImportError as e:
         print(f"⚠️ 必要なライブラリが不足しています: {e}")
@@ -1078,6 +1069,113 @@ def initialize_tts_system(model_name: str = "yoshino_test", model_dir: str = "mo
         return None
     except Exception as e:
         print(f"⚠️ 音声システム初期化エラー: {e}")
+        return None
+
+
+def start_background_tts_server(model_dir: str, model_name: str, device: str) -> Optional[object]:
+    """バックグラウンドでTTSサーバーを起動"""
+    try:
+        import threading
+        import time
+        from pathlib import Path
+        import torch
+        from style_bert_vits2.tts_model import TTSModelHolder
+        from style_bert_vits2.utils import torch_device_to_onnx_providers
+        
+        # デバイス設定
+        if device == "auto":
+            if torch.cuda.is_available():
+                device = "cuda"
+                print("✓ GPU(CUDA)を使用します")
+            else:
+                device = "cpu" 
+                print("⚠️ GPUが利用できません。CPUを使用します")
+        
+        print(f"📁 TTSモデルホルダーを初期化中... (パス: {model_dir})")
+        
+        # TTSModelHolderを作成
+        model_holder = TTSModelHolder(
+            Path(model_dir),
+            device,
+            torch_device_to_onnx_providers(device),
+            ignore_onnx=True,
+        )
+        
+        print(f"📋 利用可能なモデル: {list(model_holder.model_names)}")
+        
+        # 指定されたモデルが存在するかチェック
+        if model_name not in model_holder.model_names:
+            print(f"⚠️ 指定されたモデル '{model_name}' が見つかりません")
+            print(f"💡 利用可能なモデル: {list(model_holder.model_names)}")
+            if model_holder.model_names:
+                model_name = list(model_holder.model_names)[0]
+                print(f"🔄 最初のモデルを使用します: {model_name}")
+            else:
+                print("❌ 利用可能なモデルがありません")
+                return None
+        
+        # バックグラウンドTTSサーバークラス
+        class BackgroundTTSServer:
+            def __init__(self, model_holder, model_name):
+                self.model_holder = model_holder
+                self.model_name = model_name
+                self.is_running = True
+                
+            def synthesize_speech(self, text: str, output_path: str = "output.wav", **kwargs) -> Optional[str]:
+                """音声合成を実行"""
+                try:
+                    # デフォルトパラメータ
+                    params = {
+                        'model_name': self.model_name,
+                        'text': text,
+                        'language': kwargs.get('language', 'JP'),
+                        'speaker_id': kwargs.get('speaker_id', 0),
+                        'sdp_ratio': kwargs.get('sdp_ratio', 0.2),
+                        'noise': kwargs.get('noise', 0.6),
+                        'noise_w': kwargs.get('noise_w', 0.8),
+                        'length': kwargs.get('length', 1.0),
+                        'style': kwargs.get('style', 'Neutral'),
+                    }
+                    
+                    print(f"🎵 音声合成実行中: '{text[:50]}{'...' if len(text) > 50 else ''}'")
+                    
+                    # TTSModelHolderを使用して音声合成
+                    result = self.model_holder.infer(**params)
+                    
+                    # 結果の保存
+                    if hasattr(result, 'audio') and hasattr(result, 'sample_rate'):
+                        from scipy.io import wavfile
+                        import numpy as np
+                        
+                        # numpyのfloat32配列をint16に変換
+                        audio_data = result.audio
+                        if audio_data.dtype == np.float32:
+                            audio_data = (audio_data * 32767).astype(np.int16)
+                        
+                        wavfile.write(output_path, result.sample_rate, audio_data)
+                        print(f"✓ 音声ファイル生成完了: {output_path}")
+                        return output_path
+                    else:
+                        print("⚠️ 音声生成結果の形式が予期されたものと異なります")
+                        return None
+                        
+                except Exception as e:
+                    print(f"⚠️ 音声合成エラー: {e}")
+                    return None
+                    
+            def stop(self):
+                """サーバー停止"""
+                self.is_running = False
+                print("🛑 TTSサーバーを停止しました")
+        
+        # サーバーインスタンス作成
+        tts_server = BackgroundTTSServer(model_holder, model_name)
+        
+        print("✓ バックグラウンドTTSサーバーが起動しました")
+        return tts_server
+        
+    except Exception as e:
+        print(f"⚠️ バックグラウンドTTSサーバー起動エラー: {e}")
         return None
 
 
@@ -1169,24 +1267,30 @@ def initialize_native_tts_system(model_dir: str, model_name: str, device: str) -
 
 
 def text_to_speech_if_available(text: str, output_path: str = "output.wav") -> Optional[str]:
-    """音声合成の実行（GoogleColab専用）"""
+    """音声合成の実行（バックグラウンドTTSサーバー対応）"""
     if not is_colab_environment():
         print("⚠️ 音声合成はGoogleColab環境でのみ利用可能です")
         return None
         
     try:
-        # グローバル音声モデルの確認
-        if not hasattr(text_to_speech_if_available, '_voice_model'):
-            print("⚠️ 音声モデルが初期化されていません")
+        # グローバル音声サーバーの確認
+        if not hasattr(text_to_speech_if_available, '_tts_server'):
+            print("⚠️ TTSサーバーが初期化されていません")
             return None
             
-        voice_model = getattr(text_to_speech_if_available, '_voice_model')
-        if voice_model is None:
+        tts_server = getattr(text_to_speech_if_available, '_tts_server')
+        if tts_server is None:
+            print("⚠️ TTSサーバーが利用できません")
             return None
             
-        # 音声生成実行
-        result_path = voice_model.inference(text, output_path)
-        return str(result_path)
+        # バックグラウンドTTSサーバーを使用して音声合成
+        if hasattr(tts_server, 'synthesize_speech'):
+            result_path = tts_server.synthesize_speech(text, output_path)
+            return result_path
+        else:
+            # 従来の方式（フォールバック）
+            result_path = tts_server.inference(text, output_path)
+            return str(result_path)
         
     except Exception as e:
         print(f"⚠️ 音声合成エラー: {e}")
@@ -1204,20 +1308,20 @@ def integrated_langchain_mode() -> None:
     print("")
     print("'戻る'と入力すると通常モードに戻ります。\n")
     
-    # 音声モデルの初期化（GoogleColab環境のみ）
-    voice_model = None
+    # バックグラウンドTTSサーバーの初期化（GoogleColab環境のみ）
+    tts_server = None
     if is_colab_environment():
         try:
-            print("🎵 音声モデルを初期化中...")
-            voice_model = initialize_tts_system()
-            if voice_model:
+            print("🎵 バックグラウンドTTSサーバーを初期化中...")
+            tts_server = initialize_tts_system()
+            if tts_server:
                 # グローバル変数に保存（後で使用するため）
-                text_to_speech_if_available._voice_model = voice_model
-                print("✓ 音声モデル初期化完了\n")
+                text_to_speech_if_available._tts_server = tts_server
+                print("✓ バックグラウンドTTSサーバー初期化完了\n")
             else:
-                print("⚠️ 音声モデルが利用できません（通常モードで続行）\n")
+                print("⚠️ TTSサーバーが利用できません（通常モードで続行）\n")
         except Exception as e:
-            print(f"⚠️ 音声モデル初期化エラー: {e}")
+            print(f"⚠️ TTSサーバー初期化エラー: {e}")
             print("💡 音声なしで続行します\n")
     else:
         print("💡 ローカル環境では音声機能は無効です\n")
@@ -1265,24 +1369,25 @@ def integrated_langchain_mode() -> None:
         
         print(f"\n🤖 **回答**:\n{response}\n")
         
-        # 音声生成と再生
-        if voice_model:
+        # バックグラウンドTTSサーバーを使用した音声生成
+        if tts_server:
             try:
                 # AIの出力をai_voice変数に格納
                 ai_voice = response
                 
-                print("🎵 音声を生成中...")
-                # 安全な音声生成
+                print("🎵 バックグラウンドTTSサーバーで音声を生成中...")
+                # バックグラウンドTTSサーバーを使用した音声生成
                 audio_file = text_to_speech_if_available(ai_voice, "out.wav")
                 
                 if audio_file:
                     print("🔊 音声を再生します...")
                     try:
                         from IPython.display import Audio, display
-                        display(Audio("out.wav"))
+                        display(Audio(audio_file))
+                        print(f"✓ 音声再生完了: {audio_file}")
                     except ImportError:
                         print("⚠️ Jupyter環境ではないため音声再生をスキップします")
-                        print(f"💡 {audio_file}ファイルが生成されました")
+                        print(f"💡 音声ファイルが生成されました: {audio_file}")
                 else:
                     print("⚠️ 音声生成に失敗しました")
                     
