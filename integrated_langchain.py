@@ -963,6 +963,7 @@ def setup_drive_and_find_model_dir(default_model_dir: str = "model_assets", mode
         
         # 可能性のあるモデルパス候補
         possible_paths = [
+            f"{drive_mount_point}/MyDrive/Style-Bert-VITS2/model_assets",  # 優先パス
             f"{drive_mount_point}/MyDrive/{default_model_dir}",
             f"{drive_mount_point}/MyDrive/model_assets",
             f"{drive_mount_point}/MyDrive/models",
@@ -987,16 +988,17 @@ def setup_drive_and_find_model_dir(default_model_dir: str = "model_assets", mode
         # 見つからない場合は手動アップロード案内
         print("❌ モデルディレクトリが見つかりませんでした")
         print("\n📋 解決方法:")
-        print("1. Googleドライブのマイドライブに 'model_assets' フォルダを作成")
-        print("2. その中に音声モデル（yoshino_testフォルダ）をアップロード")
-        print("3. または、Colabの左サイドバーからファイルを直接アップロード")
-        print("\n💡 ドライブの構造例:")
+        print("1. Googleドライブのマイドライブに以下の構造でファイルを配置:")
+        print("   MyDrive/Style-Bert-VITS2/model_assets/yoshino_test/")
+        print("2. または、Colabの左サイドバーからファイルを直接アップロード")
+        print("\n💡 推奨ドライブ構造:")
         print("   MyDrive/")
-        print("   ├── model_assets/")
-        print("   │   └── yoshino_test/")
-        print("   │       ├── config.json")
-        print("   │       ├── model.pth")
-        print("   │       └── style_vectors.npy")
+        print("   └── Style-Bert-VITS2/")
+        print("       └── model_assets/")
+        print("           └── yoshino_test/")
+        print("               ├── config.json")
+        print("               ├── model.pth")
+        print("               └── style_vectors.npy")
         
         return None
         
