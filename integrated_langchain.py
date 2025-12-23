@@ -987,14 +987,66 @@ def setup_drive_and_find_model_dir(default_model_dir: str = "model_assets", mode
                 print("✓ Googleドライブは既にマウントされています")
             else:
                 print("📁 Googleドライブをマウント中...")
-                # マウント実行（エラーの詳細を取得）
+                
+                # カーネル状態のチェックとマウント実行
                 try:
-                    drive.mount(drive_mount_point, force_remount=False)
-                    print("✓ Googleドライブがマウントされました")
+                    # IPythonカーネルの状態確認
+                    try:
+                        from IPython import get_ipython
+                        ipython = get_ipython()
+                        if ipython is None:
+                            print("⚠️ IPythonカーネルが見つかりません。代替方法を使用します。")
+                            # 代替マウント方法を試行
+                            import subprocess
+                            result = subprocess.run(['ls', '/content/drive/MyDrive'], capture_output=True, text=True)
+                            if result.returncode == 0:
+                                print("✓ ドライブは既にアクセス可能です")
+                            else:
+                                print("❌ ドライブへのアクセスができません")
+                                return None
+                        else:
+                            print("✓ IPythonカーネルが検出されました")
+                            # 通常のマウント実行
+                            drive.mount(drive_mount_point, force_remount=False)
+                            print("✓ Googleドライブがマウントされました")
+                            
+                    except Exception as kernel_error:
+                        print(f"⚠️ カーネルチェックエラー: {kernel_error}")
+                        
+                        # 最終フォールバック: 直接的なディレクトリ確認
+                        print("🔄 直接ディレクトリ確認を実行中...")
+                        import subprocess
+                        try:
+                            # Google Driveがマウントされているかチェック
+                            check_cmd = ['test', '-d', '/content/drive/MyDrive']
+                            result = subprocess.run(check_cmd, capture_output=True)
+                            
+                            if result.returncode == 0:
+                                print("✓ Google Drive ディレクトリが既に存在します")
+                            else:
+                                print("❌ Google Driveディレクトリが見つかりません")
+                                print("💡 手動でドライブをマウントしてください:")
+                                print("   from google.colab import drive")
+                                print("   drive.mount('/content/drive')")
+                                return None
+                                
+                        except Exception as subprocess_error:
+                            print(f"❌ ディレクトリチェックエラー: {subprocess_error}")
+                            return None
+                            
                 except Exception as mount_error:
                     print(f"❌ ドライブマウント詳細エラー: {mount_error}")
                     print(f"エラータイプ: {type(mount_error)}")
-                    # マウントに失敗した場合のフォールバック
+                    
+                    # エラー種別に応じた対処
+                    error_str = str(mount_error)
+                    if 'kernel' in error_str:
+                        print("💡 カーネルエラーが検出されました。手動マウントを推奨します:")
+                        print("   1. 新しいセルで以下を実行:")
+                        print("   from google.colab import drive")
+                        print("   drive.mount('/content/drive')")
+                        print("   2. 認証を完了してから再実行してください")
+                    
                     return None
             
         except ImportError as import_error:
@@ -1363,6 +1415,34 @@ def text_to_speech_if_available(text: str, output_path: str = "output.wav") -> O
         print(f"⚠️ 音声合成エラー: {e}")
         return None
 
+
+def mount_drive_safely() -> bool:
+    """安全にGoogleドライブをマウントする関数"""
+    try:
+        import os
+        from google.colab import drive
+        
+        drive_mount_point = "/content/drive"
+        
+        # 既にマウントされているかチェック
+        if os.path.exists(f"{drive_mount_point}/MyDrive"):
+            print("✅ Googleドライブは既にマウントされています")
+            return True
+        
+        print("📁 Googleドライブを手動マウント中...")
+        
+        # 安全なマウント実行
+        try:
+            drive.mount(drive_mount_point)
+            print("✅ Googleドライブのマウントが完了しました")
+            return True
+        except Exception as e:
+            print(f"❌ マウントエラー: {e}")
+            return False
+            
+    except Exception as e:
+        print(f"❌ ドライブマウント関数エラー: {e}")
+        return False
 
 def integrated_langchain_mode() -> None:
     """統合LangChainモードのメイン処理（音声機能付き）"""
