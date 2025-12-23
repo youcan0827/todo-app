@@ -951,10 +951,24 @@ JSON形式のみで回答:
 def setup_drive_and_find_model_dir(default_model_dir: str = "model_assets", model_name: str = "yoshino_test") -> Optional[str]:
     """Googleドライブをマウントしてモデルディレクトリを検索"""
     try:
-        # Colab環境でのみドライブマウントを実行
-        if not is_colab_environment():
+        # より詳細なColab環境チェック
+        import os
+        import sys
+        
+        # 複数の方法でColab環境を確認
+        colab_indicators = [
+            'google.colab' in sys.modules,
+            os.path.exists('/content'),
+            os.environ.get('COLAB_GPU'),
+            'COLAB_TPU_ADDR' in os.environ,
+            hasattr(__builtins__, '__IPYTHON__') and os.path.exists('/content')
+        ]
+        
+        is_colab = any(colab_indicators)
+        print(f"🔍 環境チェック: Colab={is_colab}, indicators={colab_indicators}")
+        
+        if not is_colab:
             print("⚠️ Colab環境ではないため、ローカルパスを確認します")
-            import os
             if os.path.exists(default_model_dir):
                 return default_model_dir
             else:
@@ -962,14 +976,30 @@ def setup_drive_and_find_model_dir(default_model_dir: str = "model_assets", mode
                 return None
         
         # Googleドライブをマウント（Colab環境のみ）
-        from google.colab import drive
-        import os
-        
-        drive_mount_point = "/content/drive"
-        if not os.path.exists(drive_mount_point):
-            print("📁 Googleドライブをマウント中...")
-            drive.mount(drive_mount_point)
-            print("✓ Googleドライブがマウントされました")
+        try:
+            from google.colab import drive
+            print("✓ google.colabモジュールのインポート成功")
+            
+            drive_mount_point = "/content/drive"
+            
+            # 既にマウントされているかチェック
+            if os.path.exists(f"{drive_mount_point}/MyDrive"):
+                print("✓ Googleドライブは既にマウントされています")
+            else:
+                print("📁 Googleドライブをマウント中...")
+                # マウント実行（エラーの詳細を取得）
+                try:
+                    drive.mount(drive_mount_point, force_remount=False)
+                    print("✓ Googleドライブがマウントされました")
+                except Exception as mount_error:
+                    print(f"❌ ドライブマウント詳細エラー: {mount_error}")
+                    print(f"エラータイプ: {type(mount_error)}")
+                    # マウントに失敗した場合のフォールバック
+                    return None
+            
+        except ImportError as import_error:
+            print(f"❌ google.colabインポートエラー: {import_error}")
+            return None
         
         # 可能性のあるモデルパス候補
         possible_paths = [
@@ -1018,11 +1048,38 @@ def setup_drive_and_find_model_dir(default_model_dir: str = "model_assets", mode
 
 
 def is_colab_environment() -> bool:
-    """GoogleColab環境かどうかを判定"""
+    """GoogleColab環境かどうかを判定（強化版）"""
     try:
-        import google.colab
-        return True
-    except ImportError:
+        import os
+        import sys
+        
+        # 複数の指標でColab環境を判定
+        indicators = {
+            'google_colab_module': False,
+            'content_dir': os.path.exists('/content'),
+            'colab_gpu_env': bool(os.environ.get('COLAB_GPU')),
+            'colab_tpu_env': bool(os.environ.get('COLAB_TPU_ADDR')),
+            'ipython_and_content': hasattr(__builtins__, '__IPYTHON__') and os.path.exists('/content')
+        }
+        
+        # google.colabモジュールの存在確認
+        try:
+            import google.colab
+            indicators['google_colab_module'] = True
+        except ImportError:
+            indicators['google_colab_module'] = False
+        
+        # デバッグ情報出力
+        print(f"🔍 Colab環境判定詳細: {indicators}")
+        
+        # いずれかの指標が真であればColab環境と判定
+        is_colab = any(indicators.values())
+        print(f"🎯 最終判定: Colab環境 = {is_colab}")
+        
+        return is_colab
+        
+    except Exception as e:
+        print(f"⚠️ Colab環境判定エラー: {e}")
         return False
 
 
