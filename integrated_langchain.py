@@ -1352,12 +1352,34 @@ def integrated_langchain_mode() -> None:
         return
     
     
-    # 対話ループ
+    # 対話ループ（Colab対応）
     while True:
-        user_input = input("💬 質問を入力してください: ").strip()
+        try:
+            # Colab環境での入力対応
+            if is_colab_environment():
+                user_input = input("💬 質問を入力してください（'戻る'で終了）: ")
+            else:
+                user_input = input("💬 質問を入力してください: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print("\n👋 統合LangChain高機能自然言語モードを終了します。")
+            break
+        except Exception as e:
+            print(f"⚠️ 入力エラー: {e}")
+            print("💡 Colabでは直接入力ができない場合があります。")
+            print("以下のようにコードセルで直接実行してください：")
+            print("""
+# 質問例をコードセルで直接実行
+from integrated_langchain import IntegratedLangChainAgent
+agent = IntegratedLangChainAgent()
+response = agent.process_query("今日のタスクは？")
+print(response)
+""")
+            break
+        
+        user_input = user_input.strip()
         
         # 終了条件
-        if user_input.lower() in ['戻る', 'back', 'exit', 'quit']:
+        if user_input.lower() in ['戻る', 'back', 'exit', 'quit', '']:
             print("👋 統合LangChain高機能自然言語モードを終了します。")
             break
         
@@ -1407,5 +1429,82 @@ def integrated_langchain_mode() -> None:
         print("-" * 60)
 
 
+def colab_quick_chat(question: str = "今日のタスクは？") -> str:
+    """GoogleColab用の簡単チャット関数"""
+    try:
+        print("🤖 AI自然言語モードを起動しています...")
+        
+        # エージェントの初期化
+        agent = IntegratedLangChainAgent()
+        
+        if not agent.llm_available:
+            return "❌ LLMが利用できません。APIキーを確認してください。"
+        
+        print(f"💬 質問: {question}")
+        print("🔍 AI が回答を生成しています...")
+        
+        # 質問処理
+        response = agent.process_query(question)
+        
+        print(f"\n🤖 **回答**:\n{response}\n")
+        
+        return response
+        
+    except Exception as e:
+        error_msg = f"❌ エラーが発生しました: {e}"
+        print(error_msg)
+        return error_msg
+
+def colab_setup_guide():
+    """GoogleColab用のセットアップガイド"""
+    print("""
+🚀 GoogleColab用 TODO AIアプリ セットアップガイド
+
+## 📋 必要な準備:
+1. OpenRouter APIキーの設定
+2. Googleドライブのマウント（音声機能用、オプション）
+
+## 💻 使用方法:
+
+### 方法1: 簡単チャット（推奨）
+```python
+# 質問をして回答を得る
+colab_quick_chat("今日のタスクを確認して")
+colab_quick_chat("明日までにレポートを書くタスクを追加")
+colab_quick_chat("タスクの進捗はどう？")
+```
+
+### 方法2: 対話モード
+```python
+# 対話式モード（入力に制限あり）
+integrated_langchain_mode()
+```
+
+### 方法3: 直接エージェント操作
+```python
+# エージェントを直接操作
+from integrated_langchain import IntegratedLangChainAgent
+agent = IntegratedLangChainAgent()
+response = agent.process_query("カレンダーの予定を確認して")
+print(response)
+```
+
+## 🎵 音声機能を使用する場合:
+1. GoogleドライブをマウントしてSystem-Bert-VITS2のモデルを配置
+2. パス: /content/drive/MyDrive/Style-Bert-VITS2/model_assets/yoshino_test/
+
+## 📝 よくある質問例:
+- "今日のタスクは？"
+- "明日までにレポートを書くタスクを追加して"
+- "完了したタスクを教えて"
+- "来週の予定は？"
+- "タスクの進捗状況を確認"
+""")
+
 if __name__ == "__main__":
-    integrated_langchain_mode()
+    if is_colab_environment():
+        print("🔧 GoogleColab環境が検出されました")
+        colab_setup_guide()
+        print("\n💡 まずは colab_quick_chat('質問内容') を試してください！")
+    else:
+        integrated_langchain_mode()
