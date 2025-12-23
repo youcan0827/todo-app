@@ -1030,42 +1030,47 @@ def initialize_tts_system(model_name: str = "yoshino_test", model_dir: str = "mo
         if model_dir is None:
             return None
             
-        # model_loadモジュールの存在確認
-        import importlib.util
-        spec = importlib.util.find_spec("model_load")
-        if spec is None:
-            print("⚠️ model_loadモジュールが見つかりません")
-            print("💡 GoogleColabでmodel_load.pyをアップロードしてください")
-            return None
-            
         # style_bert_vits2の存在確認
+        import importlib.util
         spec = importlib.util.find_spec("style_bert_vits2")
         if spec is None:
             print("⚠️ style_bert_vits2ライブラリがインストールされていません")
             print("💡 Colabで !pip install style-bert-vits2 を実行してください")
             return None
-        
-        # Colab環境でのデバイス設定（GPU優先）
-        if device == "auto":
-            import torch
-            if torch.cuda.is_available():
-                device = "cuda"
-                print("✓ GPU(CUDA)を使用します")
-            else:
-                device = "cpu"
-                print("⚠️ GPUが利用できません。CPUを使用します")
             
-        from model_load import load_model
+        # Style-Bert-VITS2の初期化システム（app.pyと同様）
+        print("🎌 pyopenjtalk_workerを初期化中...")
+        from style_bert_vits2.nlp.japanese import pyopenjtalk_worker
+        from style_bert_vits2.nlp.japanese.user_dict import update_dict
         
-        # モデルロード
-        voice_model = load_model(
-            model_name=model_name,
-            model_dir=model_dir,
-            device=device,
-            cpu=(device == "cpu")
-        )
+        # pyopenjtalk_workerの初期化（Style-Bert-VITS2のapp.pyと同じ）
+        pyopenjtalk_worker.initialize_worker()
+        print("✓ pyopenjtalk_worker初期化完了")
         
-        return voice_model
+        # 辞書データの適用
+        print("📚 辞書データを適用中...")
+        update_dict()
+        print("✓ 辞書データ適用完了")
+        
+        # model_loadモジュールの確認（オプション）
+        spec = importlib.util.find_spec("model_load")
+        if spec is None:
+            print("⚠️ model_loadモジュールが見つかりません")
+            print("💡 内蔵のStyle-Bert-VITS2機能を使用します")
+            
+            # Style-Bert-VITS2のネイティブ機能を使用
+            return initialize_native_tts_system(model_dir, model_name, device)
+        else:
+            # 既存のmodel_loadを使用
+            print("💡 既存のmodel_loadモジュールを使用します")
+            from model_load import load_model
+            voice_model = load_model(
+                model_name=model_name,
+                model_dir=model_dir,
+                device=device,
+                cpu=(device == "cpu")
+            )
+            return voice_model
         
     except ImportError as e:
         print(f"⚠️ 必要なライブラリが不足しています: {e}")
@@ -1073,6 +1078,93 @@ def initialize_tts_system(model_name: str = "yoshino_test", model_dir: str = "mo
         return None
     except Exception as e:
         print(f"⚠️ 音声システム初期化エラー: {e}")
+        return None
+
+
+def initialize_native_tts_system(model_dir: str, model_name: str, device: str) -> Optional[object]:
+    """Style-Bert-VITS2のネイティブ機能を使用したTTS初期化"""
+    try:
+        from pathlib import Path
+        import torch
+        from style_bert_vits2.tts_model import TTSModelHolder
+        from style_bert_vits2.utils import torch_device_to_onnx_providers
+        
+        # Colab環境でのデバイス設定（GPU優先）
+        if device == "auto":
+            if torch.cuda.is_available():
+                device = "cuda"
+                print("✓ GPU(CUDA)を使用します")
+            else:
+                device = "cpu"
+                print("⚠️ GPUが利用できません。CPUを使用します")
+        
+        print(f"📁 モデルホルダーを初期化中... (パス: {model_dir})")
+        
+        # TTSModelHolderを作成（Style-Bert-VITS2のapp.pyと同様）
+        model_holder = TTSModelHolder(
+            Path(model_dir),
+            device,
+            torch_device_to_onnx_providers(device),
+            ignore_onnx=True,  # app.pyと同じ設定
+        )
+        
+        print(f"✓ TTSModelHolder初期化完了")
+        print(f"📋 利用可能なモデル: {list(model_holder.model_names)}")
+        
+        # 指定されたモデルが存在するかチェック
+        if model_name not in model_holder.model_names:
+            print(f"⚠️ 指定されたモデル '{model_name}' が見つかりません")
+            print(f"💡 利用可能なモデル: {list(model_holder.model_names)}")
+            if model_holder.model_names:
+                model_name = list(model_holder.model_names)[0]
+                print(f"🔄 最初のモデルを使用します: {model_name}")
+            else:
+                print("❌ 利用可能なモデルがありません")
+                return None
+        
+        # シンプルなラッパークラスを作成
+        class NativeTTSModel:
+            def __init__(self, model_holder, model_name):
+                self.model_holder = model_holder
+                self.model_name = model_name
+            
+            def inference(self, text: str, output_path: str, **kwargs) -> str:
+                """音声合成を実行"""
+                try:
+                    # デフォルトパラメータ
+                    params = {
+                        'model_name': self.model_name,
+                        'text': text,
+                        'language': 'JP',
+                        'speaker_id': 0,
+                        'sdp_ratio': 0.2,
+                        'noise': 0.6,
+                        'noise_w': 0.8,
+                        'length': 1.0,
+                        **kwargs
+                    }
+                    
+                    # TTSModelHolderを使用して音声合成
+                    from pathlib import Path
+                    result = self.model_holder.infer(**params)
+                    
+                    # 結果を指定されたパスに保存
+                    if hasattr(result, 'audio') and hasattr(result, 'sample_rate'):
+                        from scipy.io import wavfile
+                        wavfile.write(output_path, result.sample_rate, result.audio)
+                        return output_path
+                    else:
+                        print("⚠️ 音声生成結果の形式が予期されたものと異なります")
+                        return None
+                        
+                except Exception as e:
+                    print(f"⚠️ 音声合成エラー: {e}")
+                    return None
+        
+        return NativeTTSModel(model_holder, model_name)
+        
+    except Exception as e:
+        print(f"⚠️ ネイティブTTSシステム初期化エラー: {e}")
         return None
 
 
