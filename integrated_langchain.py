@@ -947,28 +947,131 @@ JSON形式のみで回答:
         return report
 
 
+# GoogleColab環境専用音声機能
+def is_colab_environment() -> bool:
+    """GoogleColab環境かどうかを判定"""
+    try:
+        import google.colab
+        return True
+    except ImportError:
+        return False
+
+
+def initialize_tts_system(model_name: str = "yoshino_test", model_dir: str = "model_assets", device: str = "auto") -> Optional[object]:
+    """音声合成システムの初期化（GoogleColab専用）"""
+    # GoogleColab環境チェック
+    if not is_colab_environment():
+        print("⚠️ 音声機能はGoogleColab環境でのみ利用可能です")
+        print("💡 GoogleColabでこのスクリプトを実行してください")
+        return None
+    
+    try:
+        # model_loadモジュールの存在確認
+        import importlib.util
+        spec = importlib.util.find_spec("model_load")
+        if spec is None:
+            print("⚠️ model_loadモジュールが見つかりません")
+            print("💡 GoogleColabでモデルファイルをアップロードしてください")
+            return None
+            
+        # style_bert_vits2の存在確認
+        spec = importlib.util.find_spec("style_bert_vits2")
+        if spec is None:
+            print("⚠️ style_bert_vits2ライブラリがインストールされていません")
+            print("💡 Colabで !pip install style-bert-vits2 を実行してください")
+            return None
+        
+        # モデルディレクトリの存在確認
+        import os
+        if not os.path.exists(model_dir):
+            print(f"⚠️ モデルディレクトリが見つかりません: {model_dir}")
+            print("💡 Colabにモデルファイルをアップロードしてください")
+            return None
+        
+        # Colab環境でのデバイス設定（GPU優先）
+        if device == "auto":
+            import torch
+            if torch.cuda.is_available():
+                device = "cuda"
+                print("✓ GPU(CUDA)を使用します")
+            else:
+                device = "cpu"
+                print("⚠️ GPUが利用できません。CPUを使用します")
+            
+        from model_load import load_model
+        
+        # モデルロード
+        voice_model = load_model(
+            model_name=model_name,
+            model_dir=model_dir,
+            device=device,
+            cpu=(device == "cpu")
+        )
+        
+        return voice_model
+        
+    except ImportError as e:
+        print(f"⚠️ 必要なライブラリが不足しています: {e}")
+        print("💡 Colabでライブラリをインストールしてください")
+        return None
+    except Exception as e:
+        print(f"⚠️ 音声システム初期化エラー: {e}")
+        return None
+
+
+def text_to_speech_if_available(text: str, output_path: str = "output.wav") -> Optional[str]:
+    """音声合成の実行（GoogleColab専用）"""
+    if not is_colab_environment():
+        print("⚠️ 音声合成はGoogleColab環境でのみ利用可能です")
+        return None
+        
+    try:
+        # グローバル音声モデルの確認
+        if not hasattr(text_to_speech_if_available, '_voice_model'):
+            print("⚠️ 音声モデルが初期化されていません")
+            return None
+            
+        voice_model = getattr(text_to_speech_if_available, '_voice_model')
+        if voice_model is None:
+            return None
+            
+        # 音声生成実行
+        result_path = voice_model.inference(text, output_path)
+        return str(result_path)
+        
+    except Exception as e:
+        print(f"⚠️ 音声合成エラー: {e}")
+        return None
+
+
 def integrated_langchain_mode() -> None:
     """統合LangChainモードのメイン処理（音声機能付き）"""
     print("\n=== 統合LangChain高機能自然言語モード（音声付き） ===")
     print("LangChainを使ってカレンダーとタスクの情報を検索してお答えします。")
-    print("🎵 AIの応答を音声でも再生します！")
+    if is_colab_environment():
+        print("🎵 AIの応答を音声でも再生します！（GoogleColab環境）")
+    else:
+        print("💬 音声機能はGoogleColab環境でのみ利用可能です")
     print("")
     print("'戻る'と入力すると通常モードに戻ります。\n")
     
-    # 音声モデルの初期化
+    # 音声モデルの初期化（GoogleColab環境のみ）
     voice_model = None
-    try:
-        print("🎵 音声モデルを初期化中...")
-        from model_load import load_model
-        voice_model = load_model(
-            model_name="yoshino_test",
-            model_dir="model_assets",
-            device="cuda"
-        )
-        print("✓ 音声モデル初期化完了\n")
-    except Exception as e:
-        print(f"⚠️ 音声モデル初期化エラー: {e}")
-        print("💡 音声なしで続行します\n")
+    if is_colab_environment():
+        try:
+            print("🎵 音声モデルを初期化中...")
+            voice_model = initialize_tts_system()
+            if voice_model:
+                # グローバル変数に保存（後で使用するため）
+                text_to_speech_if_available._voice_model = voice_model
+                print("✓ 音声モデル初期化完了\n")
+            else:
+                print("⚠️ 音声モデルが利用できません（通常モードで続行）\n")
+        except Exception as e:
+            print(f"⚠️ 音声モデル初期化エラー: {e}")
+            print("💡 音声なしで続行します\n")
+    else:
+        print("💡 ローカル環境では音声機能は無効です\n")
     
     try:
         # エージェントの初期化
@@ -1020,17 +1123,19 @@ def integrated_langchain_mode() -> None:
                 ai_voice = response
                 
                 print("🎵 音声を生成中...")
-                # 音声生成（指定されたコードそのまま）
-                voice_model.inference(ai_voice, "out.wav")
+                # 安全な音声生成
+                audio_file = text_to_speech_if_available(ai_voice, "out.wav")
                 
-                # 音声再生
-                print("🔊 音声を再生します...")
-                try:
-                    from IPython.display import Audio, display
-                    display(Audio("out.wav"))
-                except ImportError:
-                    print("⚠️ Jupyter環境ではないため音声再生をスキップします")
-                    print("💡 out.wavファイルが生成されました")
+                if audio_file:
+                    print("🔊 音声を再生します...")
+                    try:
+                        from IPython.display import Audio, display
+                        display(Audio("out.wav"))
+                    except ImportError:
+                        print("⚠️ Jupyter環境ではないため音声再生をスキップします")
+                        print(f"💡 {audio_file}ファイルが生成されました")
+                else:
+                    print("⚠️ 音声生成に失敗しました")
                     
             except Exception as e:
                 print(f"⚠️ 音声生成エラー: {e}")
