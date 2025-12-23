@@ -951,7 +951,17 @@ JSON形式のみで回答:
 def setup_drive_and_find_model_dir(default_model_dir: str = "model_assets", model_name: str = "yoshino_test") -> Optional[str]:
     """Googleドライブをマウントしてモデルディレクトリを検索"""
     try:
-        # Googleドライブをマウント
+        # Colab環境でのみドライブマウントを実行
+        if not is_colab_environment():
+            print("⚠️ Colab環境ではないため、ローカルパスを確認します")
+            import os
+            if os.path.exists(default_model_dir):
+                return default_model_dir
+            else:
+                print(f"❌ ローカルモデルディレクトリが見つかりません: {default_model_dir}")
+                return None
+        
+        # Googleドライブをマウント（Colab環境のみ）
         from google.colab import drive
         import os
         

@@ -197,150 +197,20 @@ def natural_language_mode() -> None:
         print("必要な依存関係をインストールしてください：")
         print("pip install langchain langchain-openai python-dotenv")
 
-def style_bert_vits2_webui_mode() -> None:
-    """Style-Bert-VITS2 WebUIサーバー起動モード"""
-    print("\n=== Style-Bert-VITS2 WebUIサーバー ===")
-    print("音声合成・学習・マージ機能を含むWebUIサーバーを起動します")
-    print("ブラウザでGradioインターフェースが開きます\n")
-    
-    try:
-        # 必要なライブラリの確認
-        import gradio as gr
-        import torch
-        from style_bert_vits2.nlp.japanese import pyopenjtalk_worker
-        from style_bert_vits2.nlp.japanese.user_dict import update_dict
-        
-        # サーバー起動オプションの選択
-        print("サーバー起動オプション:")
-        print("1. ローカル起動 (http://127.0.0.1:7860)")
-        print("2. 共有リンク付き起動 (--share)")
-        print("3. 戻る")
-        
-        choice = input("選択してください (1-3): ").strip()
-        
-        if choice == "1":
-            launch_webui_server(share=False)
-        elif choice == "2":
-            launch_webui_server(share=True)
-        elif choice == "3":
-            return
-        else:
-            print("エラー: 1-3の数字を入力してください。")
-            
-    except ImportError as e:
-        print(f"❌ 必要なライブラリが不足しています: {e}")
-        print("以下をインストールしてください:")
-        print("pip install gradio torch style-bert-vits2")
-        print("pip install torch torchvision torchaudio")
-    except Exception as e:
-        print(f"❌ WebUIサーバー起動エラー: {e}")
-
-def launch_webui_server(share: bool = False) -> None:
-    """WebUIサーバーの実際の起動処理"""
-    try:
-        # 必要なモジュールのインポート
-        import argparse
-        from pathlib import Path
-        import gradio as gr
-        import torch
-        from config import get_path_config
-        from style_bert_vits2.constants import GRADIO_THEME, VERSION
-        from style_bert_vits2.nlp.japanese import pyopenjtalk_worker
-        from style_bert_vits2.nlp.japanese.user_dict import update_dict
-        from style_bert_vits2.tts_model import TTSModelHolder
-        from style_bert_vits2.utils import torch_device_to_onnx_providers
-        
-        print("🎌 pyopenjtalk_workerを初期化中...")
-        pyopenjtalk_worker.initialize_worker()
-        print("📚 辞書データを適用中...")
-        update_dict()
-        print("✓ 初期化完了")
-        
-        # デバイス設定
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        print(f"🖥️ 使用デバイス: {device}")
-        
-        # パス設定とモデルホルダー作成
-        path_config = get_path_config()
-        print(f"📁 モデルアセットパス: {path_config.assets_root}")
-        
-        model_holder = TTSModelHolder(
-            Path(path_config.assets_root),
-            device,
-            torch_device_to_onnx_providers(device),
-            ignore_onnx=True,
-        )
-        
-        print(f"📋 利用可能なモデル: {list(model_holder.model_names)}")
-        
-        # Gradio UIの動的インポート（遅延インポート）
-        try:
-            from gradio_tabs.inference import create_inference_app
-            from gradio_tabs.dataset import create_dataset_app
-            from gradio_tabs.train import create_train_app
-            from gradio_tabs.style_vectors import create_style_vectors_app
-            from gradio_tabs.merge import create_merge_app
-            from gradio_tabs.convert_onnx import create_onnx_app
-            
-            # Gradio アプリケーション構築
-            with gr.Blocks(theme=GRADIO_THEME) as app:
-                gr.Markdown(f"# Style-Bert-VITS2 WebUI (version {VERSION})")
-                gr.Markdown("### 🎵 音声合成・学習・マージ統合WebUI")
-                
-                with gr.Tabs():
-                    with gr.Tab("🎤 音声合成"):
-                        create_inference_app(model_holder=model_holder)
-                    with gr.Tab("📊 データセット作成"):
-                        create_dataset_app()
-                    with gr.Tab("🚀 学習"):
-                        create_train_app()
-                    with gr.Tab("🎨 スタイル作成"):
-                        create_style_vectors_app()
-                    with gr.Tab("🔀 マージ"):
-                        create_merge_app(model_holder=model_holder)
-                    with gr.Tab("⚡ ONNX変換"):
-                        create_onnx_app(model_holder=model_holder)
-            
-            # サーバー起動
-            print("\n🚀 WebUIサーバーを起動しています...")
-            if share:
-                print("🌐 共有リンク付きで起動します（外部からアクセス可能）")
-            else:
-                print("🏠 ローカルモードで起動します")
-            
-            app.launch(
-                server_name="0.0.0.0" if share else "127.0.0.1",
-                server_port=7860,
-                inbrowser=True,
-                share=share,
-            )
-            
-        except ImportError as e:
-            print(f"❌ Gradioタブモジュールが見つかりません: {e}")
-            print("💡 Style-Bert-VITS2の完全版をインストールしてください")
-            
-    except Exception as e:
-        print(f"❌ WebUIサーバー起動エラー: {e}")
-        print("🔧 トラブルシューティング:")
-        print("1. 必要なライブラリがインストールされているか確認")
-        print("2. モデルファイルが正しい場所にあるか確認")
-        print("3. ポート7860が使用可能か確認")
-
 
 
 
 # メニュー画面
 def show_menu() -> None:
-    print("\n" + "="*50)
+    print("\n" + "="*40)
     print("         CLI TODO管理アプリ")
-    print("="*50)
+    print("="*40)
     print("1. タスク追加")
     print("2. タスク確認")
     print("3. タスク完了")
     print("4. 🤖 AI自然言語モード（LangChain統合）")
-    print("5. 🎵 Style-Bert-VITS2 WebUIサーバー起動")
-    print("6. 終了")
-    print("="*50)
+    print("5. 終了")
+    print("="*40)
 
 # メニュー画面の選択に応じた挙動
 def main() -> None:
@@ -351,7 +221,7 @@ def main() -> None:
     
     while True:
         show_menu()
-        choice = input("選択してください (1-6): ").strip()
+        choice = input("選択してください (1-5): ").strip()
         
         if choice == "1":
             add_task()
@@ -362,12 +232,10 @@ def main() -> None:
         elif choice == "4":
             natural_language_mode()
         elif choice == "5":
-            style_bert_vits2_webui_mode()
-        elif choice == "6":
             print("アプリケーションを終了します。")
             break
         else:
-            print("エラー: 1-6の数字を入力してください。")
+            print("エラー: 1-5の数字を入力してください。")
 
 
 if __name__ == "__main__":
