@@ -1163,8 +1163,16 @@ def initialize_tts_system(model_name: str = "yoshino_test", model_dir: str = "mo
         from style_bert_vits2.nlp.japanese.user_dict import update_dict
         
         # pyopenjtalk_workerの初期化（Style-Bert-VITS2のapp.pyと同じ）
-        pyopenjtalk_worker.initialize_worker()
-        print("✓ pyopenjtalk_worker初期化完了")
+        try:
+            pyopenjtalk_worker.initialize_worker()
+            print("✓ pyopenjtalk_worker初期化完了")
+        except Exception as e:
+            print(f"❌ pyopenjtalk_worker初期化エラー: {e}")
+            print(f"❌ エラータイプ: {type(e).__name__}")
+            import traceback
+            print("❌ 詳細なスタックトレース:")
+            traceback.print_exc()
+            raise e
         
         # 辞書データの適用
         print("📚 辞書データを適用中...")
@@ -1213,12 +1221,23 @@ def start_background_tts_server(model_dir: str, model_name: str, device: str) ->
         print(f"📁 TTSモデルホルダーを初期化中... (パス: {model_dir})")
         
         # TTSModelHolderを作成
-        model_holder = TTSModelHolder(
-            Path(model_dir),
-            device,
-            torch_device_to_onnx_providers(device),
-            ignore_onnx=True,
-        )
+        try:
+            model_holder = TTSModelHolder(
+                Path(model_dir),
+                device,
+                torch_device_to_onnx_providers(device),
+                ignore_onnx=True,
+            )
+            print("✓ TTSModelHolder作成成功")
+        except Exception as e:
+            print(f"❌ TTSModelHolder作成エラー: {e}")
+            print(f"❌ エラータイプ: {type(e).__name__}")
+            print(f"❌ モデルディレクトリ: {model_dir}")
+            print(f"❌ 使用デバイス: {device}")
+            import traceback
+            print("❌ 詳細なスタックトレース:")
+            traceback.print_exc()
+            raise e
         
         print(f"📋 利用可能なモデル: {list(model_holder.model_names)}")
         
