@@ -567,8 +567,13 @@ class IntegratedLangChainAgent:
         try:
             # 怒るべきかどうかをキーワード検索でチェック
             if self._should_get_angry(user_input):
-                # シンプルひろゆき風システムを使用
-                from simple_hiroyuki_chat import SimpleHiroyukiChat
+                # シンプルひろゆき風システムを使用（インポートエラー対応）
+                try:
+                    from simple_hiroyuki_chat import SimpleHiroyukiChat
+                except ImportError:
+                    print("⚠️ simple_hiroyuki_chat モジュールが見つかりません。内蔵のひろゆき風応答を使用します。")
+                    # 代替処理：内蔵のHiroyukiResponseSystemを使用
+                    SimpleHiroyukiChat = None
                 
                 # 未完了タスク数を取得
                 try:
@@ -818,7 +823,14 @@ JSON形式のみで回答:
     def _simple_hiroyuki_convert(self, original_response: str, user_context: str = "") -> str:
         """シンプルひろゆき風変換（ユーザープロンプトのみ）"""
         try:
-            from simple_hiroyuki_chat import SimpleHiroyukiChat
+            try:
+                from simple_hiroyuki_chat import SimpleHiroyukiChat
+            except ImportError:
+                # simple_hiroyuki_chatが見つからない場合は内蔵システムを使用
+                return self.hiroyuki_system.get_hiroyuki_response(
+                    original_response, 
+                    self._count_incomplete_tasks()
+                )
             hiroyuki_chat = SimpleHiroyukiChat()
             
             # ユーザーの指示から特定キーワードをチェック
@@ -1317,8 +1329,23 @@ def start_background_tts_server(model_dir: str, model_name: str, device: str) ->
                     
                     print(f"🎵 音声合成実行中: '{text[:50]}{'...' if len(text) > 50 else ''}'")
                     
-                    # TTSModelHolderを使用して音声合成
-                    result = self.model_holder.infer(**params)
+                    # TTSModelHolderのメソッドを動的検出して音声合成
+                    if hasattr(self.model_holder, 'infer'):
+                        result = self.model_holder.infer(**params)
+                    elif hasattr(self.model_holder, 'tts'):
+                        # 新しいバージョンのメソッド
+                        result = self.model_holder.tts(**params)
+                    elif hasattr(self.model_holder, 'synthesize'):
+                        result = self.model_holder.synthesize(**params)
+                    elif hasattr(self.model_holder, 'generate'):
+                        result = self.model_holder.generate(**params)
+                    else:
+                        # 利用可能なメソッドを確認
+                        available_methods = [method for method in dir(self.model_holder) 
+                                           if not method.startswith('_') and callable(getattr(self.model_holder, method))]
+                        print(f"⚠️ 適切な音声合成メソッドが見つかりません")
+                        print(f"🔍 利用可能なメソッド: {available_methods}")
+                        raise AttributeError(f"TTSModelHolderに音声合成メソッドが見つかりません。利用可能: {available_methods}")
                     
                     # 結果の保存
                     if hasattr(result, 'audio') and hasattr(result, 'sample_rate'):
@@ -1452,7 +1479,20 @@ def initialize_native_tts_system(model_dir: str, model_name: str, device: str) -
                     
                     # TTSModelHolderを使用して音声合成
                     from pathlib import Path
-                    result = self.model_holder.infer(**params)
+                    
+                    # TTSModelHolderのメソッドを動的検出して音声合成
+                    if hasattr(self.model_holder, 'infer'):
+                        result = self.model_holder.infer(**params)
+                    elif hasattr(self.model_holder, 'tts'):
+                        result = self.model_holder.tts(**params)
+                    elif hasattr(self.model_holder, 'synthesize'):
+                        result = self.model_holder.synthesize(**params)
+                    elif hasattr(self.model_holder, 'generate'):
+                        result = self.model_holder.generate(**params)
+                    else:
+                        available_methods = [method for method in dir(self.model_holder) 
+                                           if not method.startswith('_') and callable(getattr(self.model_holder, method))]
+                        raise AttributeError(f"TTSModelHolderに音声合成メソッドが見つかりません。利用可能: {available_methods}")
                     
                     # 結果を指定されたパスに保存
                     if hasattr(result, 'audio') and hasattr(result, 'sample_rate'):
