@@ -22,13 +22,36 @@ import csv
 import datetime
 from typing import List, Dict, Optional
 
-# Style-Bert-VITS2インポートテスト
+# Style-Bert-VITS2インポートテストと代替実装
 try:
     from style_bert_vits2.utils import torch_device_to_onnx_providers
     print("✅ style_bert_vits2.utils.torch_device_to_onnx_providers のインポートに成功しました")
 except ImportError as e:
-    print(f"❌ style_bert_vits2.utils.torch_device_to_onnx_providers のインポートに失敗: {e}")
-    print("💡 Google Colabで 'pip install style_bert_vits2' を実行してください")
+    print(f"❌ torch_device_to_onnx_providers のインポートに失敗: {e}")
+    print("💡 代替実装を使用します")
+    
+    # torch_device_to_onnx_providers の代替実装
+    def torch_device_to_onnx_providers(device):
+        """
+        PyTorchデバイスをONNX Runtime実行プロバイダーに変換する代替実装
+        """
+        import torch
+        
+        if isinstance(device, str):
+            device = torch.device(device)
+        elif isinstance(device, torch.device):
+            pass
+        else:
+            device = torch.device('cpu')
+            
+        if device.type == "cuda":
+            return ["CUDAExecutionProvider", "CPUExecutionProvider"]
+        else:
+            return ["CPUExecutionProvider"]
+    
+    # グローバルスコープで利用可能にする
+    globals()['torch_device_to_onnx_providers'] = torch_device_to_onnx_providers
+    print("✅ torch_device_to_onnx_providers 代替実装を作成しました")
 # 履歴確認機能（統合版に移行済み）
 # 画像生成機能（オプション）
 try:

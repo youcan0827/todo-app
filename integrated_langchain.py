@@ -1207,7 +1207,11 @@ def start_background_tts_server(model_dir: str, model_name: str, device: str) ->
         from pathlib import Path
         import torch
         from style_bert_vits2.tts_model import TTSModelHolder
-        from style_bert_vits2.utils import torch_device_to_onnx_providers
+        # torch_device_to_onnx_providers の互換性インポート
+        try:
+            from style_bert_vits2.utils import torch_device_to_onnx_providers
+        except ImportError:
+            from torch_device_onnx_compat import torch_device_to_onnx_providers
         
         # デバイス設定
         if device == "auto":
@@ -1220,14 +1224,25 @@ def start_background_tts_server(model_dir: str, model_name: str, device: str) ->
         
         print(f"📁 TTSモデルホルダーを初期化中... (パス: {model_dir})")
         
-        # TTSModelHolderを作成
+        # TTSModelHolderを作成（バージョン互換性対応）
         try:
-            model_holder = TTSModelHolder(
-                Path(model_dir),
-                device,
-                torch_device_to_onnx_providers(device),
-                ignore_onnx=True,
-            )
+            # ignore_onnxパラメータの互換性チェック
+            import inspect
+            sig = inspect.signature(TTSModelHolder.__init__)
+            
+            if 'ignore_onnx' in sig.parameters:
+                model_holder = TTSModelHolder(
+                    Path(model_dir),
+                    device,
+                    torch_device_to_onnx_providers(device),
+                    ignore_onnx=True,
+                )
+            else:
+                model_holder = TTSModelHolder(
+                    Path(model_dir),
+                    device,
+                    torch_device_to_onnx_providers(device),
+                )
             print("✓ TTSModelHolder作成成功")
         except Exception as e:
             print(f"❌ TTSModelHolder作成エラー: {e}")
@@ -1323,7 +1338,11 @@ def initialize_native_tts_system(model_dir: str, model_name: str, device: str) -
         from pathlib import Path
         import torch
         from style_bert_vits2.tts_model import TTSModelHolder
-        from style_bert_vits2.utils import torch_device_to_onnx_providers
+        # torch_device_to_onnx_providers の互換性インポート
+        try:
+            from style_bert_vits2.utils import torch_device_to_onnx_providers
+        except ImportError:
+            from torch_device_onnx_compat import torch_device_to_onnx_providers
         
         # Colab環境でのデバイス設定（GPU優先）
         if device == "auto":
@@ -1336,13 +1355,23 @@ def initialize_native_tts_system(model_dir: str, model_name: str, device: str) -
         
         print(f"📁 モデルホルダーを初期化中... (パス: {model_dir})")
         
-        # TTSModelHolderを作成（Style-Bert-VITS2のapp.pyと同様）
-        model_holder = TTSModelHolder(
-            Path(model_dir),
-            device,
-            torch_device_to_onnx_providers(device),
-            ignore_onnx=True,  # app.pyと同じ設定
-        )
+        # TTSModelHolderを作成（バージョン互換性対応）
+        import inspect
+        sig = inspect.signature(TTSModelHolder.__init__)
+        
+        if 'ignore_onnx' in sig.parameters:
+            model_holder = TTSModelHolder(
+                Path(model_dir),
+                device,
+                torch_device_to_onnx_providers(device),
+                ignore_onnx=True,
+            )
+        else:
+            model_holder = TTSModelHolder(
+                Path(model_dir),
+                device,
+                torch_device_to_onnx_providers(device),
+            )
         
         print(f"✓ TTSModelHolder初期化完了")
         print(f"📋 利用可能なモデル: {list(model_holder.model_names)}")

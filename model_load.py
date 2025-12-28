@@ -27,7 +27,11 @@ from style_bert_vits2.nlp import bert_models, onnx_bert_models
 from style_bert_vits2.nlp.japanese import pyopenjtalk_worker as pyopenjtalk
 from style_bert_vits2.nlp.japanese.user_dict import update_dict
 from style_bert_vits2.tts_model import TTSModel, TTSModelHolder
-from style_bert_vits2.utils import torch_device_to_onnx_providers
+# torch_device_to_onnx_providers の互換性インポート
+try:
+    from style_bert_vits2.utils import torch_device_to_onnx_providers
+except ImportError:
+    from torch_device_onnx_compat import torch_device_to_onnx_providers
 
 
 # ----------------------------
