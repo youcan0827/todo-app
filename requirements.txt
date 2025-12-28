@@ -15,6 +15,10 @@ pydantic>=1.10.0
 # 画像生成機能に必要なパッケージ
 torch>=2.0.0
 diffusers>=0.21.0
+
+# TTS機能に必要なパッケージ
+style_bert_vits2>=2.5.0
+scipy>=1.10.0
 # sdnqはGitHubからインストールが必要（Colabでは自動インストール）
 # git+https://github.com/huggingface/diffusers
 # git+https://github.com/Disty0/sdnq
