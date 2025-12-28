@@ -1,10 +1,34 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-import csv
+# Style-Bert-VITS2パス優先順位修正
+# システムインストール済みライブラリを最優先で読み込む
+import sys
 import os
+
+# カレントディレクトリを sys.path から除去（古いローカルファイルを避ける）
+if '.' in sys.path:
+    sys.path.remove('.')
+if '' in sys.path:
+    sys.path.remove('')
+
+# システムライブラリパスを最優先に設定
+system_lib_path = '/usr/local/lib/python3.12/dist-packages'
+if system_lib_path not in sys.path:
+    sys.path.insert(0, system_lib_path)
+
+# 標準ライブラリのインポート
+import csv
 import datetime
 from typing import List, Dict, Optional
+
+# Style-Bert-VITS2インポートテスト
+try:
+    from style_bert_vits2.utils import torch_device_to_onnx_providers
+    print("✅ style_bert_vits2.utils.torch_device_to_onnx_providers のインポートに成功しました")
+except ImportError as e:
+    print(f"❌ style_bert_vits2.utils.torch_device_to_onnx_providers のインポートに失敗: {e}")
+    print("💡 Google Colabで 'pip install style_bert_vits2' を実行してください")
 # 履歴確認機能（統合版に移行済み）
 # 画像生成機能（オプション）
 try:
