@@ -1226,24 +1226,49 @@ def start_background_tts_server(model_dir: str, model_name: str, device: str) ->
         
         # TTSModelHolderを作成（バージョン互換性対応）
         try:
-            # ignore_onnxパラメータの互換性チェック
+            # TTSModelHolderの引数パターンを試行錯誤で判定
             import inspect
             sig = inspect.signature(TTSModelHolder.__init__)
+            param_names = list(sig.parameters.keys())[1:]  # selfを除外
+            param_count = len(param_names)
             
-            if 'ignore_onnx' in sig.parameters:
+            print(f"🔍 TTSModelHolder引数数: {param_count}, パラメータ: {param_names}")
+            
+            # 引数数に応じて適切な呼び出し方法を選択
+            if param_count == 1:
+                # model_dir のみ
+                model_holder = TTSModelHolder(Path(model_dir))
+                print("✓ パターン1: model_dir のみで初期化")
+            elif param_count == 2:
+                # model_dir, device
+                model_holder = TTSModelHolder(Path(model_dir), device)
+                print("✓ パターン2: model_dir, device で初期化")
+            elif param_count == 3:
+                # model_dir, device, onnx_providers
                 model_holder = TTSModelHolder(
                     Path(model_dir),
                     device,
-                    torch_device_to_onnx_providers(device),
-                    ignore_onnx=True,
+                    torch_device_to_onnx_providers(device)
                 )
+                print("✓ パターン3: model_dir, device, onnx_providers で初期化")
             else:
-                model_holder = TTSModelHolder(
-                    Path(model_dir),
-                    device,
-                    torch_device_to_onnx_providers(device),
-                )
-            print("✓ TTSModelHolder作成成功")
+                # 4つ以上: model_dir, device, onnx_providers, ignore_onnx
+                if 'ignore_onnx' in param_names:
+                    model_holder = TTSModelHolder(
+                        Path(model_dir),
+                        device,
+                        torch_device_to_onnx_providers(device),
+                        ignore_onnx=True,
+                    )
+                    print("✓ パターン4: 全引数で初期化（ignore_onnx=True）")
+                else:
+                    model_holder = TTSModelHolder(
+                        Path(model_dir),
+                        device,
+                        torch_device_to_onnx_providers(device),
+                    )
+                    print("✓ パターン5: model_dir, device, onnx_providers で初期化")
+            print("✅ TTSModelHolder作成成功")
         except Exception as e:
             print(f"❌ TTSModelHolder作成エラー: {e}")
             print(f"❌ エラータイプ: {type(e).__name__}")
@@ -1358,20 +1383,36 @@ def initialize_native_tts_system(model_dir: str, model_name: str, device: str) -
         # TTSModelHolderを作成（バージョン互換性対応）
         import inspect
         sig = inspect.signature(TTSModelHolder.__init__)
+        param_names = list(sig.parameters.keys())[1:]  # selfを除外
+        param_count = len(param_names)
         
-        if 'ignore_onnx' in sig.parameters:
+        print(f"🔍 TTSModelHolder引数数: {param_count}, パラメータ: {param_names}")
+        
+        # 引数数に応じて適切な呼び出し方法を選択
+        if param_count == 1:
+            model_holder = TTSModelHolder(Path(model_dir))
+        elif param_count == 2:
+            model_holder = TTSModelHolder(Path(model_dir), device)
+        elif param_count == 3:
             model_holder = TTSModelHolder(
                 Path(model_dir),
                 device,
-                torch_device_to_onnx_providers(device),
-                ignore_onnx=True,
+                torch_device_to_onnx_providers(device)
             )
         else:
-            model_holder = TTSModelHolder(
-                Path(model_dir),
-                device,
-                torch_device_to_onnx_providers(device),
-            )
+            if 'ignore_onnx' in param_names:
+                model_holder = TTSModelHolder(
+                    Path(model_dir),
+                    device,
+                    torch_device_to_onnx_providers(device),
+                    ignore_onnx=True,
+                )
+            else:
+                model_holder = TTSModelHolder(
+                    Path(model_dir),
+                    device,
+                    torch_device_to_onnx_providers(device),
+                )
         
         print(f"✓ TTSModelHolder初期化完了")
         print(f"📋 利用可能なモデル: {list(model_holder.model_names)}")
