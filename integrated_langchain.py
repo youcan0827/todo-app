@@ -526,6 +526,9 @@ class IntegratedLangChainAgent:
             self.llm = None
             self.llm_available = False
         
+        # ひろゆき風応答システムの初期化
+        self.hiroyuki_system = HiroyukiResponseSystem()
+        
         # 利用可能なツールを統合（自然言語タスク管理を追加）
         self.tools = [search_calendar_events, list_csv_tasks, add_task_naturally, complete_task_naturally, delete_task_naturally]
         
@@ -860,6 +863,10 @@ JSON形式のみで回答:
         except Exception as e:
             # 変換失敗時のフォールバック
             return f"おいらとしては、{original_response}って感じですよね。まあ、普通の人はそう思うんじゃないですか？"
+    
+    def _count_incomplete_tasks(self) -> int:
+        """未完了タスク数をカウント"""
+        return self._get_incomplete_task_count()
     
 
     # 🤖 統合された怒りシステム
@@ -1253,40 +1260,50 @@ def start_background_tts_server(model_dir: str, model_name: str, device: str) ->
             
             print(f"🔍 TTSModelHolder引数数: {param_count}, パラメータ: {param_names}")
             
-            # 引数数に応じて適切な呼び出し方法を選択
-            if param_count == 1:
-                # model_dir のみ
-                model_holder = TTSModelHolder(Path(model_dir))
-                print("✓ パターン1: model_dir のみで初期化")
-            elif param_count == 2:
-                # model_dir, device
-                model_holder = TTSModelHolder(Path(model_dir), device)
-                print("✓ パターン2: model_dir, device で初期化")
-            elif param_count == 3:
-                # model_dir, device, onnx_providers
+            # まず最も一般的な初期化パターンを試行
+            try:
                 model_holder = TTSModelHolder(
                     Path(model_dir),
                     device,
-                    torch_device_to_onnx_providers(device)
+                    torch_device_to_onnx_providers(device),
+                    ignore_onnx=True,
                 )
-                print("✓ パターン3: model_dir, device, onnx_providers で初期化")
-            else:
-                # 4つ以上: model_dir, device, onnx_providers, ignore_onnx
-                if 'ignore_onnx' in param_names:
+                print("✓ 標準パターン: 全引数で初期化成功")
+            except TypeError:
+                # 引数数に応じて適切な呼び出し方法を選択
+                if param_count == 1:
+                    # model_dir のみ
+                    model_holder = TTSModelHolder(Path(model_dir))
+                    print("✓ パターン1: model_dir のみで初期化")
+                elif param_count == 2:
+                    # model_dir, device
+                    model_holder = TTSModelHolder(Path(model_dir), device)
+                    print("✓ パターン2: model_dir, device で初期化")
+                elif param_count == 3:
+                    # model_dir, device, onnx_providers
                     model_holder = TTSModelHolder(
                         Path(model_dir),
                         device,
-                        torch_device_to_onnx_providers(device),
-                        ignore_onnx=True,
+                        torch_device_to_onnx_providers(device)
                     )
-                    print("✓ パターン4: 全引数で初期化（ignore_onnx=True）")
+                    print("✓ パターン3: model_dir, device, onnx_providers で初期化")
                 else:
-                    model_holder = TTSModelHolder(
-                        Path(model_dir),
-                        device,
-                        torch_device_to_onnx_providers(device),
-                    )
-                    print("✓ パターン5: model_dir, device, onnx_providers で初期化")
+                    # 4つ以上: model_dir, device, onnx_providers, ignore_onnx
+                    if 'ignore_onnx' in param_names:
+                        model_holder = TTSModelHolder(
+                            Path(model_dir),
+                            device,
+                            torch_device_to_onnx_providers(device),
+                            ignore_onnx=True,
+                        )
+                        print("✓ パターン4: 全引数で初期化（ignore_onnx=True）")
+                    else:
+                        model_holder = TTSModelHolder(
+                            Path(model_dir),
+                            device,
+                            torch_device_to_onnx_providers(device),
+                        )
+                        print("✓ パターン5: model_dir, device, onnx_providers で初期化")
             print("✅ TTSModelHolder作成成功")
         except Exception as e:
             print(f"❌ TTSModelHolder作成エラー: {e}")
@@ -1339,7 +1356,21 @@ def start_background_tts_server(model_dir: str, model_name: str, device: str) ->
                     # TTSModelHolderから個別モデルを取得して音声合成
                     if hasattr(self.model_holder, 'get_model'):
                         print(f"🔍 get_modelを使用してモデル '{self.model_name}' を取得中...")
-                        model = self.model_holder.get_model(self.model_name)
+                        # Style-Bert-VITS2のバージョン互換性対応
+                        try:
+                            # 新しいAPI（keyword-only引数対応）
+                            model = self.model_holder.get_model(self.model_name)
+                        except TypeError as e:
+                            if 'model_path_str' in str(e):
+                                print("⚠️ 旧バージョンのStyle-Bert-VITS2を検出。代替方法を試行します...")
+                                # 旧バージョン用のフォールバック：models辞書から直接取得を試行
+                                if hasattr(self.model_holder, 'models') and self.model_name in self.model_holder.models:
+                                    model = self.model_holder.models[self.model_name]
+                                else:
+                                    print("❌ 旧バージョンでのモデル取得に失敗しました")
+                                    model = None
+                            else:
+                                raise e
                         
                         if model and hasattr(model, 'infer'):
                             result = model.infer(**params)
@@ -1354,7 +1385,8 @@ def start_background_tts_server(model_dir: str, model_name: str, device: str) ->
                                            if not method.startswith('_') and callable(getattr(model, method))] if model else []
                             print(f"⚠️ モデル '{self.model_name}' の音声合成メソッドが見つかりません")
                             print(f"🔍 モデルのメソッド: {model_methods}")
-                            raise AttributeError(f"モデル '{self.model_name}' に音声合成メソッドが見つかりません")
+                            print(f"🔍 モデルの型: {type(model)}")
+                            raise AttributeError(f"モデル '{self.model_name}' に音声合成メソッドが見つかりません。利用可能メソッド: {model_methods}")
                     else:
                         # 旧方式を試行
                         available_methods = [method for method in dir(self.model_holder) 
@@ -1382,6 +1414,11 @@ def start_background_tts_server(model_dir: str, model_name: str, device: str) ->
                         
                 except Exception as e:
                     print(f"⚠️ 音声合成エラー: {e}")
+                    print(f"⚠️ エラータイプ: {type(e).__name__}")
+                    print(f"⚠️ 使用パラメータ: {params}")
+                    import traceback
+                    print("⚠️ 詳細なエラー情報:")
+                    traceback.print_exc()
                     return None
                     
             def stop(self):
@@ -1499,7 +1536,21 @@ def initialize_native_tts_system(model_dir: str, model_name: str, device: str) -
                     # TTSModelHolderから個別モデルを取得して音声合成
                     if hasattr(self.model_holder, 'get_model'):
                         print(f"🔍 get_modelを使用してモデル '{self.model_name}' を取得中...")
-                        model = self.model_holder.get_model(self.model_name)
+                        # Style-Bert-VITS2のバージョン互換性対応
+                        try:
+                            # 新しいAPI（keyword-only引数対応）
+                            model = self.model_holder.get_model(self.model_name)
+                        except TypeError as e:
+                            if 'model_path_str' in str(e):
+                                print("⚠️ 旧バージョンのStyle-Bert-VITS2を検出。代替方法を試行します...")
+                                # 旧バージョン用のフォールバック：models辞書から直接取得を試行
+                                if hasattr(self.model_holder, 'models') and self.model_name in self.model_holder.models:
+                                    model = self.model_holder.models[self.model_name]
+                                else:
+                                    print("❌ 旧バージョンでのモデル取得に失敗しました")
+                                    model = None
+                            else:
+                                raise e
                         
                         if model and hasattr(model, 'infer'):
                             result = model.infer(**params)
@@ -1514,7 +1565,8 @@ def initialize_native_tts_system(model_dir: str, model_name: str, device: str) -
                                            if not method.startswith('_') and callable(getattr(model, method))] if model else []
                             print(f"⚠️ モデル '{self.model_name}' の音声合成メソッドが見つかりません")
                             print(f"🔍 モデルのメソッド: {model_methods}")
-                            raise AttributeError(f"モデル '{self.model_name}' に音声合成メソッドが見つかりません")
+                            print(f"🔍 モデルの型: {type(model)}")
+                            raise AttributeError(f"モデル '{self.model_name}' に音声合成メソッドが見つかりません。利用可能メソッド: {model_methods}")
                     else:
                         available_methods = [method for method in dir(self.model_holder) 
                                            if not method.startswith('_') and callable(getattr(self.model_holder, method))]
@@ -1531,6 +1583,11 @@ def initialize_native_tts_system(model_dir: str, model_name: str, device: str) -
                         
                 except Exception as e:
                     print(f"⚠️ 音声合成エラー: {e}")
+                    print(f"⚠️ エラータイプ: {type(e).__name__}")
+                    print(f"⚠️ 使用パラメータ: {params}")
+                    import traceback
+                    print("⚠️ 詳細なエラー情報:")
+                    traceback.print_exc()
                     return None
         
         return NativeTTSModel(model_holder, model_name)
