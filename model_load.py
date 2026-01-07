@@ -23,7 +23,13 @@ from style_bert_vits2.constants import (
     Languages,
 )
 from style_bert_vits2.logging import logger
-from style_bert_vits2.nlp import bert_models, onnx_bert_models
+# ONNX BERT のインポートはオプション（エラー回避）
+from style_bert_vits2.nlp import bert_models
+try:
+    from style_bert_vits2.nlp import onnx_bert_models
+except ImportError:
+    print("⚠️ onnx_bert_models が利用できません（ONNX機能は無効）")
+    onnx_bert_models = None
 from style_bert_vits2.nlp.japanese import pyopenjtalk_worker as pyopenjtalk
 from style_bert_vits2.nlp.japanese.user_dict import update_dict
 from style_bert_vits2.tts_model import TTSModel, TTSModelHolder
@@ -83,7 +89,7 @@ def _init_bert_once(device: str, preload_onnx_bert: bool) -> None:
         bert_models.load_tokenizer(Languages.JP)
         _bert_ready[key_pt] = True
 
-    if preload_onnx_bert:
+    if preload_onnx_bert and onnx_bert_models is not None:
         key_onnx = (device, True)
         if not _bert_ready.get(key_onnx, False):
             onnx_bert_models.load_model(
@@ -92,6 +98,8 @@ def _init_bert_once(device: str, preload_onnx_bert: bool) -> None:
             )
             onnx_bert_models.load_tokenizer(Languages.JP)
             _bert_ready[key_onnx] = True
+    elif preload_onnx_bert:
+        print("⚠️ onnx_bert_models が利用できないため、ONNX BERTはスキップします")
 
 
 def _get_holder(model_dir: Union[str, Path], device: str) -> TTSModelHolder:

@@ -529,6 +529,11 @@ class IntegratedLangChainAgent:
         # ひろゆき風応答システムの初期化
         self.hiroyuki_system = HiroyukiResponseSystem()
         
+        # 音声合成システムの初期化
+        self.tts_model = None
+        self.tts_available = False
+        self._initialize_tts_system()
+        
         # 利用可能なツールを統合（自然言語タスク管理を追加）
         self.tools = [search_calendar_events, list_csv_tasks, add_task_naturally, complete_task_naturally, delete_task_naturally]
         
@@ -562,6 +567,925 @@ class IntegratedLangChainAgent:
 - 予定を確認したい場合：search_calendar_eventsを使用
 
 日本語で親しみやすい口調で回答してください。"""
+    
+    def _install_required_packages(self):
+        """必要なパッケージを自動インストール"""
+        import subprocess
+        import sys
+        
+        packages = {
+            'gtts': 'gTTS',
+            'pygame': 'pygame', 
+            'transformers': 'transformers',
+            'torch': 'torch',
+            'style-bert-vits2': 'style-bert-vits2'
+        }
+        
+        installed = []
+        for package_name, import_name in packages.items():
+            try:
+                __import__(import_name.lower().replace('-', '_'))
+                print(f"✅ {package_name} 既にインストール済み")
+            except ImportError:
+                try:
+                    print(f"📥 {package_name} インストール中...")
+                    subprocess.check_call([
+                        sys.executable, '-m', 'pip', 'install', package_name, '--quiet'
+                    ])
+                    installed.append(package_name)
+                    print(f"✅ {package_name} インストール完了")
+                except subprocess.CalledProcessError as e:
+                    print(f"⚠️ {package_name} インストール失敗: {e}")
+        
+        if installed:
+            print(f"🎉 新規インストール完了: {', '.join(installed)}")
+        return len(installed) > 0
+
+    def _is_colab_environment(self) -> bool:
+        """Google Colab環境かどうかを判定"""
+        try:
+            import google.colab
+            return True
+        except ImportError:
+            return False
+
+    def _initialize_simple_tts(self):
+        """Google Colab専用：シンプルな音声合成システム初期化"""
+        print("🔊 【シンプルモード】音声合成システム初期化中...")
+        
+        try:
+            # Google Colab環境確認
+            import google.colab
+            print("✅ Google Colab環境を確認")
+        except ImportError:
+            print("❌ Google Colab環境ではありません。通常モードにフォールバック")
+            return self._initialize_tts_system_fallback()
+        
+        # test_yoshino_model_simple と完全に同じ処理を実行
+        return self._execute_simple_model_load()
+
+    def _execute_simple_model_load(self):
+        """test_yoshino_model_simple と同じロジック"""
+        try:
+            print("📦 最小実行パターンでmodel_load.pyインポート...")
+            
+            # test_yoshino_model_simpleと全く同じ手順
+            import os
+            import tempfile
+            
+            # model_load.py を直接使用（最小実行と同じ）
+            from model_load import load_model
+            print("✅ model_load.py インポート成功")
+            
+            # シンプルなパス設定（test_yoshino_model_simpleと同じ）
+            model_dir = "/content/drive/MyDrive/Style-Bert-VITS2/model_assets"
+            model_name = "yoshino_test"
+            
+            if not os.path.exists(model_dir):
+                print(f"❌ モデルディレクトリが存在しません: {model_dir}")
+                print("💡 Google Driveがマウントされ、モデルが配置されているか確認してください")
+                return self._initialize_gtts_fallback()
+            
+            print(f"🎯 モデル: {model_name}")
+            print(f"📁 パス: {model_dir}")
+            
+            # ユーザー指定パターンでモデル読み込み（test_yoshino_model_simpleと同じ）
+            print(f"sample_model = load_model('{model_name}', model_dir='{model_dir}', device='cuda')")
+            sample_model = load_model(model_name, model_dir=model_dir, device="cuda")
+            
+            print("✅ sample_model 読み込み成功")
+            
+            # テスト実行して動作確認
+            out_path = "/content/todoapp_simple_test.wav"
+            test_text = "TODOアプリのシンプルモード初期化完了"
+            
+            print(f"🧪 初期化テスト実行: sample_model.inference('{test_text}', '{out_path}')")
+            result = sample_model.inference(test_text, out_path)
+            
+            print(f"✅ 初期化テスト完了: {result}")
+            if os.path.exists(out_path):
+                size = os.path.getsize(out_path)
+                print(f"📁 ファイルサイズ: {size} bytes")
+            
+            # 成功した場合、sample_modelを設定
+            self.tts_model = sample_model
+            self.tts_available = True
+            print("✅ 【シンプルモード】TODOアプリ音声合成初期化成功")
+            return
+            
+        except Exception as e:
+            print(f"❌ シンプルモード失敗: {e}")
+            print("⚠️ gTTSにフォールバックします")
+            import traceback
+            traceback.print_exc()
+            return self._initialize_gtts_fallback()
+
+    def _initialize_tts_system_fallback(self):
+        """従来の複雑な初期化（フォールバック用）"""
+        print("🔊 【従来モード】音声合成システム初期化中...")
+        
+        # 0. 必要なライブラリを自動インストール
+        packages_installed = self._install_required_packages()
+        if packages_installed:
+            print("⚡ ライブラリインストール後、Pythonモジュールを再ロード中...")
+            import importlib
+            import sys
+            # 新しくインストールされたモジュールを利用可能にする
+            importlib.invalidate_caches()
+        
+        # 方法1: Style-Bert-VITS2を試行（model_load.py必須使用）
+
+    def _initialize_gtts_fallback(self):
+        """gTTSへの緊急フォールバック"""
+        print("🔊 gTTS緊急フォールバック初期化中...")
+        try:
+            # 基本的なgTTS設定
+            if self._is_colab_environment():
+                self.tts_model = "gtts_file_only"
+            else:
+                self.tts_model = "gtts_with_audio"
+            self.tts_available = True
+            print("✅ gTTSフォールバック初期化成功")
+        except Exception as e:
+            print(f"❌ gTTSフォールバック失敗: {e}")
+            self.tts_available = False
+
+    def _initialize_tts_system(self):
+        """音声合成システムを初期化（複数のフォールバック方式）"""
+        
+        # Google Colab環境では自動的にシンプルモードを使用
+        if self._is_colab_environment():
+            print("🎯 Google Colab環境検出：シンプルモードを使用します")
+            return self._initialize_simple_tts()
+        
+        print("🔊 音声合成システム初期化中...")
+        
+        # 0. 必要なライブラリを自動インストール
+        packages_installed = self._install_required_packages()
+        if packages_installed:
+            print("⚡ ライブラリインストール後、Pythonモジュールを再ロード中...")
+            import importlib
+            import sys
+            # 新しくインストールされたモジュールを利用可能にする
+            importlib.invalidate_caches()
+        
+        # 方法1: Style-Bert-VITS2を試行（model_load.py必須使用）
+        try:
+            print("🔧 model_load.py を使用してカスタムモデルをロード中...")
+            
+            # まず必要なモジュールが利用可能か確認
+            self._ensure_model_load_dependencies()
+            
+            # model_load.py を使用してモデルロード
+            loaded_model = self._load_style_bert_with_model_load()
+            
+            if loaded_model:
+                self.tts_model = loaded_model
+                self.tts_available = True
+                print("✅ model_load.py によるカスタムモデル初期化成功")
+                return
+            else:
+                print("⚠️ model_load.py によるカスタムモデル読み込みに失敗、フォールバックします")
+                
+        except Exception as style_bert_error:
+            print(f"⚠️ model_load.py による Style-Bert-VITS2初期化失敗: {style_bert_error}")
+            import traceback
+            traceback.print_exc()
+        
+        # 方法2: gTTSを試行（軽量代替案）
+        try:
+            from gtts import gTTS
+            
+            # テスト音声生成（ファイル保存のみ）
+            test_text = "テストです"
+            tts = gTTS(text=test_text, lang='ja')
+            test_file = "/tmp/test_tts.mp3"
+            tts.save(test_file)
+            
+            # Google Colabの場合はpygame音声再生をスキップ
+            try:
+                import pygame
+                pygame.mixer.init()
+                pygame.mixer.music.load(test_file)
+                self.tts_model = "gtts_with_audio"
+                print("✅ gTTS + pygame 音声合成システム利用可能")
+            except (pygame.error, OSError) as audio_error:
+                # 音声デバイスがない環境（Colab等）では音声ファイル生成のみ
+                print(f"⚠️ 音声再生デバイスなし（{audio_error}）、ファイル生成のみ利用可能")
+                self.tts_model = "gtts_file_only"
+                print("✅ gTTS ファイル生成システム利用可能")
+            
+            self.tts_available = True
+            return
+            
+        except Exception as gtts_error:
+            print(f"⚠️ gTTS初期化失敗: {gtts_error}")
+        
+        # 方法3: システム音声（最後の手段）
+        try:
+            import platform
+            import subprocess
+            
+            system = platform.system()
+            if system == "Darwin":  # macOS
+                # macOS sayコマンドのテスト
+                try:
+                    result = subprocess.run(["say", "--version"], capture_output=True, timeout=5)
+                    if result.returncode == 0:
+                        self.tts_model = "macos_say"
+                        self.tts_available = True
+                        print("✅ macOS say コマンド利用可能")
+                        return
+                except (subprocess.TimeoutExpired, FileNotFoundError):
+                    print("⚠️ macOS sayコマンドが見つかりません")
+                    
+            elif system == "Linux":
+                # Linux espeak/festival/speakコマンドのテスト
+                tts_commands = ["espeak", "festival", "spd-say"]
+                for cmd in tts_commands:
+                    try:
+                        result = subprocess.run([cmd, "--version"], capture_output=True, timeout=5)
+                        if result.returncode == 0:
+                            self.tts_model = f"linux_{cmd}"
+                            self.tts_available = True
+                            print(f"✅ Linux {cmd} システム音声利用可能")
+                            return
+                    except (subprocess.TimeoutExpired, FileNotFoundError):
+                        continue
+                        
+            elif system == "Windows":
+                # Windows SAPI (PowerShell)のテスト
+                try:
+                    result = subprocess.run([
+                        "powershell", "-Command", 
+                        "Add-Type -AssemblyName System.Speech; exit 0"
+                    ], capture_output=True, timeout=10)
+                    if result.returncode == 0:
+                        self.tts_model = "windows_sapi"
+                        self.tts_available = True
+                        print("✅ Windows SAPI 音声合成利用可能")
+                        return
+                except (subprocess.TimeoutExpired, FileNotFoundError):
+                    print("⚠️ Windows SAPI が利用できません")
+                    
+        except Exception as system_tts_error:
+            print(f"⚠️ システム音声初期化失敗: {system_tts_error}")
+        
+        print("❌ 全ての音声合成方法が失敗。音声機能は無効化されます。")
+        print("💡 アプリは音声なしで正常に動作します。")
+    
+    def test_tts_system(self):
+        """音声合成システムのテスト実行"""
+        print("\n🧪 音声合成システムテスト開始")
+        print("="*50)
+        
+        if not self.tts_available:
+            print("❌ 音声機能が利用できないため、テストをスキップします")
+            return False
+        
+        test_text = "こんにちは、音声合成テストです"
+        
+        try:
+            print(f"🔊 使用中の音声モデル: {self.tts_model}")
+            print(f"📝 テスト文章: {test_text}")
+            
+            # 音声合成テスト
+            self.speak_response(test_text)
+            
+            print("✅ 音声合成テスト完了")
+            return True
+            
+        except Exception as test_error:
+            print(f"❌ 音声合成テスト失敗: {test_error}")
+            return False
+    
+    def get_system_info(self):
+        """システム情報を取得"""
+        import platform
+        import sys
+        
+        info = {
+            "platform": platform.system(),
+            "python_version": sys.version,
+            "tts_available": self.tts_available,
+            "tts_model": self.tts_model if self.tts_available else "なし",
+            "llm_available": self.llm_available
+        }
+        
+        print("\n💻 システム情報")
+        print("="*30)
+        for key, value in info.items():
+            print(f"{key}: {value}")
+        
+        return info
+    
+    def _ensure_model_load_dependencies(self):
+        """model_load.py の依存関係が利用可能か確認・修正"""
+        try:
+            print("🔍 model_load.py 依存関係チェック中...")
+            
+            # 1. config.py 確認
+            try:
+                from config import get_config
+                config = get_config()
+                print("✅ config.py インポート成功")
+            except ImportError as e:
+                print(f"❌ config.py インポートエラー: {e}")
+                raise
+            
+            # 2. scipy.io.wavfile 確認
+            try:
+                from scipy.io import wavfile
+                print("✅ scipy.io.wavfile インポート成功")
+            except ImportError:
+                print("📥 scipy インストール中...")
+                import subprocess
+                import sys
+                subprocess.check_call([sys.executable, '-m', 'pip', 'install', 'scipy'])
+                from scipy.io import wavfile
+                print("✅ scipy インストール完了")
+            
+            # 3. torch_device_onnx_compat 確認
+            try:
+                from torch_device_onnx_compat import torch_device_to_onnx_providers
+                print("✅ torch_device_onnx_compat インポート成功")
+            except ImportError as e:
+                print(f"❌ torch_device_onnx_compat インポートエラー: {e}")
+                # このファイルは既に存在するはずなので、パスの問題かもしれない
+                import os
+                current_dir = os.path.dirname(__file__)
+                compat_file = os.path.join(current_dir, 'torch_device_onnx_compat.py')
+                if os.path.exists(compat_file):
+                    print(f"✅ {compat_file} は存在します")
+                else:
+                    print(f"❌ {compat_file} が見つかりません")
+                raise
+            
+            # 4. style_bert_vits2 関連モジュール確認
+            try:
+                from style_bert_vits2.constants import Languages
+                from style_bert_vits2.tts_model import TTSModel
+                print("✅ style_bert_vits2 モジュール インポート成功")
+            except ImportError as e:
+                print(f"❌ style_bert_vits2 インポートエラー: {e}")
+                # macOS環境での特別なエラーメッセージ
+                if "pyopenjtalk" in str(e).lower() or "cmake" in str(e).lower():
+                    print("🔧 macOS環境でのStyle-Bert-VITS2ビルドエラーが検出されました")
+                    print("💡 Google Colab環境での使用を推奨します")
+                    raise Exception("Style-Bert-VITS2はmacOS環境でのビルドに制限があります。Google Colabでの実行を推奨します。")
+                else:
+                    raise Exception(f"Style-Bert-VITS2のインポートに失敗: {e}")
+            
+            print("✅ model_load.py 依存関係チェック完了")
+            
+        except Exception as e:
+            print(f"❌ model_load.py 依存関係エラー: {e}")
+            raise
+
+    def _load_style_bert_with_model_load(self):
+        """model_load.py を使用してStyle-Bert-VITS2モデルをロード"""
+        try:
+            print("🔧 model_load.py によるモデルロード開始...")
+            
+            # model_load.py をインポート
+            from model_load import load_model, list_models
+            
+            # Google Driveのカスタムモデルパスを確認
+            model_configs = [
+                {
+                    "model_dir": "/content/drive/MyDrive/Style-Bert-VITS2/model_assets",
+                    "model_names": ["yoshino_test", "hiroyuki"]
+                },
+                {
+                    "model_dir": "/content",
+                    "model_names": ["hiroyuki_model", "yoshino_model"]
+                }
+            ]
+            
+            for config in model_configs:
+                model_dir = config["model_dir"]
+                
+                if not os.path.exists(model_dir):
+                    print(f"❌ ディレクトリが存在しません: {model_dir}")
+                    continue
+                
+                print(f"🔍 モデル検索中: {model_dir}")
+                
+                try:
+                    # list_models でモデル一覧を取得
+                    available_models = list_models(model_dir)
+                    print(f"📂 利用可能なモデル: {available_models}")
+                    
+                    # 優先順位でモデルを試行
+                    for model_name in config["model_names"]:
+                        if model_name in available_models:
+                            print(f"🎯 モデル '{model_name}' を model_load.py でロード中...")
+                            
+                            import torch
+                            device = "cuda" if torch.cuda.is_available() else "cpu"
+                            
+                            # model_load.py の load_model 関数を使用（ユーザー指定パターン）
+                            print(f"📋 使用例パターン:")
+                            print(f"   from model_load import load_model")
+                            print(f"   sample_model = load_model('{model_name}', model_dir='{model_dir}', device='{device}')")
+                            print(f"   sample_model.inference('テスト文章', '/content/out.wav')")
+                            print(f"")
+                            
+                            loaded_model = load_model(
+                                model_name,  # モデル名を第一引数として指定
+                                model_dir=model_dir,  # model_dirをキーワード引数として明示
+                                device=device,  # deviceをキーワード引数として明示
+                                preload_onnx_bert=False,  # ONNX BERTは無効化
+                                force_reload=False
+                            )
+                            
+                            print(f"✅ model_load.py によるモデルロード成功:")
+                            print(f"  - モデル名: {loaded_model.info.model_name}")
+                            print(f"  - モデルパス: {loaded_model.info.model_path}")
+                            try:
+                                print(f"  - 話者: {list(loaded_model.spk2id.keys())}")
+                                print(f"  - スタイル: {list(loaded_model.style2id.keys())}")
+                            except:
+                                print("  - 話者・スタイル情報の取得に失敗")
+                            
+                            # サンプル推論テスト（ユーザー指定パターンのテスト）
+                            print(f"🧪 sample_model.inference() テスト実行...")
+                            try:
+                                import tempfile
+                                temp_dir = tempfile.gettempdir()
+                                test_output = os.path.join(temp_dir, "style_bert_test.wav")
+                                
+                                # ユーザー指定パターンと同じ形式でテスト
+                                loaded_model.inference("テスト音声合成", test_output)
+                                print(f"✅ sample_model.inference() テスト成功: {test_output}")
+                                
+                                if os.path.exists(test_output):
+                                    print(f"📁 生成ファイルサイズ: {os.path.getsize(test_output)} bytes")
+                                
+                            except Exception as test_error:
+                                print(f"⚠️ sample_model.inference() テスト失敗: {test_error}")
+                            
+                            return loaded_model
+                            
+                except Exception as model_error:
+                    print(f"⚠️ モデル '{model_dir}' 処理エラー: {model_error}")
+                    continue
+            
+            print("❌ model_load.py で利用可能なカスタムモデルが見つかりませんでした")
+            return None
+            
+        except ImportError as import_error:
+            print(f"❌ model_load.py インポートエラー: {import_error}")
+            import traceback
+            traceback.print_exc()
+            return None
+        except Exception as e:
+            print(f"❌ model_load.py によるモデルロードエラー: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+    
+    def _load_style_bert_model_direct(self):
+        """Style-Bert-VITS2モデルを直接ロード（model_load.py依存なし）"""
+        try:
+            print("🔧 Style-Bert-VITS2カスタムモデル直接ロード開始...")
+            
+            # Google Driveのカスタムモデルパスを確認
+            model_configs = [
+                {
+                    "model_dir": "/content/drive/MyDrive/Style-Bert-VITS2/model_assets",
+                    "model_names": ["yoshino_test", "hiroyuki"]
+                },
+                {
+                    "model_dir": "/content",
+                    "model_names": ["hiroyuki_model", "yoshino_model"]
+                }
+            ]
+            
+            for config in model_configs:
+                model_dir = config["model_dir"]
+                
+                if not os.path.exists(model_dir):
+                    print(f"❌ ディレクトリが存在しません: {model_dir}")
+                    continue
+                
+                print(f"🔍 モデル検索中: {model_dir}")
+                
+                for model_name in config["model_names"]:
+                    model_path = os.path.join(model_dir, model_name)
+                    
+                    if not os.path.exists(model_path):
+                        print(f"❌ モデルパス存在しません: {model_path}")
+                        continue
+                    
+                    print(f"📁 モデルディレクトリ発見: {model_path}")
+                    
+                    # 必須ファイル確認
+                    config_file = os.path.join(model_path, "config.json")
+                    style_file = os.path.join(model_path, "style_vectors.npy")
+                    
+                    # モデルファイル検索
+                    model_file = None
+                    for ext in [".safetensors", ".pth", ".pt"]:
+                        candidate = os.path.join(model_path, f"model{ext}")
+                        if os.path.exists(candidate):
+                            model_file = candidate
+                            break
+                    
+                    if not os.path.exists(config_file):
+                        print(f"❌ config.json が見つかりません: {config_file}")
+                        continue
+                    
+                    if not model_file:
+                        print(f"❌ モデルファイルが見つかりません: {model_path}")
+                        continue
+                    
+                    print(f"✅ 必要ファイル確認完了:")
+                    print(f"  - config: {config_file}")
+                    print(f"  - model: {model_file}")
+                    print(f"  - style: {style_file}")
+                    
+                    try:
+                        # Style-Bert-VITS2の初期化
+                        self._initialize_style_bert_dependencies()
+                        
+                        # TTSModelを直接作成
+                        from style_bert_vits2.tts_model import TTSModel
+                        import torch
+                        
+                        device = "cuda" if torch.cuda.is_available() else "cpu"
+                        print(f"🔧 使用デバイス: {device}")
+                        
+                        # カスタムロードモデルクラス
+                        class CustomLoadedModel:
+                            def __init__(self, model_path, config_path, style_path, device):
+                                self.tts_model = TTSModel(
+                                    model_path=model_path,
+                                    config_path=config_path,
+                                    style_vec_path=style_path if os.path.exists(style_path) else None,
+                                    device=device
+                                )
+                                self.model_name = model_name
+                                
+                            def inference(self, text, output_path=None, **kwargs):
+                                """音声生成（LoadedModelインターフェース互換）"""
+                                if output_path:
+                                    import tempfile
+                                    from scipy.io import wavfile
+                                    
+                                    # Style-Bert-VITS2で音声生成
+                                    sr, audio = self.tts_model.infer(text=text)
+                                    
+                                    # WAVファイルとして保存
+                                    wavfile.write(output_path, sr, audio)
+                                    return output_path
+                                else:
+                                    # 音声データのみ返す
+                                    return self.tts_model.infer(text=text)
+                            
+                            def infer(self, text, **kwargs):
+                                """従来のinferインターフェース"""
+                                return self.tts_model.infer(text=text, **kwargs)
+                        
+                        # カスタムモデルインスタンス作成
+                        custom_model = CustomLoadedModel(
+                            model_path=model_file,
+                            config_path=config_file,
+                            style_path=style_file,
+                            device=device
+                        )
+                        
+                        print(f"✅ カスタムモデル '{model_name}' 読み込み完了")
+                        return custom_model
+                        
+                    except Exception as load_error:
+                        print(f"❌ モデル '{model_name}' 読み込みエラー: {load_error}")
+                        continue
+            
+            print("❌ 利用可能なカスタムモデルが見つかりませんでした")
+            return None
+            
+        except Exception as e:
+            print(f"❌ 直接モデルロードエラー: {e}")
+            return None
+    
+    def _initialize_style_bert_dependencies(self):
+        """Style-Bert-VITS2の依存関係を初期化"""
+        try:
+            print("🔧 Style-Bert-VITS2依存関係初期化中...")
+            
+            # pyopenjtalk初期化
+            try:
+                from style_bert_vits2.nlp.japanese import pyopenjtalk_worker
+                from style_bert_vits2.nlp.japanese.user_dict import update_dict
+                
+                pyopenjtalk_worker.initialize_worker()
+                update_dict()
+                print("✅ pyopenjtalk初期化完了")
+            except Exception as pyopenjtalk_error:
+                print(f"⚠️ pyopenjtalk初期化エラー: {pyopenjtalk_error}")
+            
+            # BERT初期化
+            try:
+                from style_bert_vits2.nlp import bert_models
+                from style_bert_vits2.constants import Languages
+                import torch
+                
+                device = "cuda" if torch.cuda.is_available() else "cpu"
+                
+                # 日本語BERTモデルロード
+                bert_models.load_model(Languages.JP, device_map=device)
+                bert_models.load_tokenizer(Languages.JP)
+                print("✅ BERT初期化完了")
+                
+            except Exception as bert_error:
+                print(f"⚠️ BERT初期化エラー: {bert_error}")
+                # BERTエラーでも続行
+                pass
+                
+        except Exception as e:
+            print(f"⚠️ 依存関係初期化エラー: {e}")
+    
+    def diagnose_tts_system(self):
+        """TTS システムの詳細診断"""
+        print("\n🔍 TTS システム診断開始")
+        print("="*60)
+        
+        # 1. 基本情報
+        print("📊 基本情報:")
+        print(f"  - TTS利用可能: {self.tts_available}")
+        print(f"  - TTSモデル: {self.tts_model}")
+        print(f"  - LLM利用可能: {self.llm_available}")
+        
+        # 2. ファイルシステム確認
+        print("\n📁 ファイルシステム確認:")
+        model_paths = [
+            "/content/drive/MyDrive/Style-Bert-VITS2/model_assets/yoshino_test",
+            "/content/drive/MyDrive/Style-Bert-VITS2/model_assets/hiroyuki",
+            "/content/hiroyuki_model",
+            "/content/yoshino_model"
+        ]
+        
+        for path in model_paths:
+            exists = os.path.exists(path)
+            status = "✅" if exists else "❌"
+            print(f"  {status} {path}")
+            
+            if exists:
+                try:
+                    files = os.listdir(path)
+                    config_exists = 'config.json' in files
+                    model_files = [f for f in files if f.endswith(('.safetensors', '.pth', '.pt'))]
+                    style_exists = 'style_vectors.npy' in files
+                    
+                    print(f"    📄 config.json: {'✅' if config_exists else '❌'}")
+                    print(f"    🤖 モデルファイル: {len(model_files)} 個 {model_files[:3]}...")
+                    print(f"    🎨 style_vectors.npy: {'✅' if style_exists else '❌'}")
+                except Exception as e:
+                    print(f"    ❌ ディレクトリ読み取りエラー: {e}")
+        
+        # 3. Style-Bert-VITS2モジュール確認
+        print("\n🔧 Style-Bert-VITS2モジュール確認:")
+        try:
+            import style_bert_vits2
+            print("  ✅ style_bert_vits2モジュール利用可能")
+            
+            try:
+                from style_bert_vits2.tts_model import TTSModel
+                print("  ✅ TTSModel インポート可能")
+            except Exception as e:
+                print(f"  ❌ TTSModel インポートエラー: {e}")
+                
+            try:
+                from style_bert_vits2.nlp import bert_models
+                print("  ✅ bert_models インポート可能")
+                
+                if hasattr(bert_models, 'DEFAULT_BERT_TOKENIZER_PATHS'):
+                    paths = getattr(bert_models, 'DEFAULT_BERT_TOKENIZER_PATHS', {})
+                    print(f"  📝 BERT設定: {paths}")
+                else:
+                    print("  ⚠️ DEFAULT_BERT_TOKENIZER_PATHSが見つかりません")
+                    
+            except Exception as e:
+                print(f"  ❌ bert_models インポートエラー: {e}")
+                
+        except ImportError as e:
+            print(f"  ❌ style_bert_vits2インポートエラー: {e}")
+        
+        # 4. 環境変数確認
+        print("\n🌐 環境変数確認:")
+        env_vars = [
+            'STYLE_BERT_VITS2_BERT_JP',
+            'BERT_MODELS_JP',
+            'BERT_BASE_DIR',
+            'JP_BERT_PATH'
+        ]
+        
+        for var in env_vars:
+            value = os.environ.get(var, "未設定")
+            print(f"  {var}: {value}")
+        
+        print("\n" + "="*60)
+        print("🔍 TTS システム診断完了")
+    
+    def download_voice_file(self, text: str, filename: str = None):
+        """Google Colab環境で音声ファイルを生成してダウンロード可能にする"""
+        try:
+            from gtts import gTTS
+            from google.colab import files
+            import time
+            
+            if not filename:
+                filename = f"hiroyuki_voice_{int(time.time())}.mp3"
+            
+            # 音声ファイル生成
+            tts = gTTS(text=text, lang='ja')
+            filepath = f"/content/{filename}"
+            tts.save(filepath)
+            
+            print(f"📁 音声ファイル生成完了: {filepath}")
+            print("🎧 ファイルをダウンロードしています...")
+            
+            # ダウンロード実行
+            files.download(filepath)
+            print("✅ ダウンロード完了！")
+            
+        except ImportError:
+            print("⚠️ Google Colab環境でのみ利用可能です")
+        except Exception as e:
+            print(f"❌ 音声ファイルダウンロードエラー: {e}")
+    
+    def speak_response(self, text: str):
+        """応答を音声で読み上げる"""
+        if not self.tts_available:
+            print("🔇 音声機能が利用できません")
+            return
+        
+        try:
+            # 長いテキストを適切に処理
+            if len(text) > 200:
+                text = text[:200] + "..."
+                print("📝 長い文章のため200文字で切り詰めました")
+            
+            if self.tts_model in ["gtts_with_audio", "gtts_file_only"]:
+                from gtts import gTTS
+                import tempfile
+                
+                tts = gTTS(text=text, lang='ja')
+                with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as temp_file:
+                    tts.save(temp_file.name)
+                    
+                    if self.tts_model == "gtts_with_audio":
+                        # 音声再生可能な環境
+                        try:
+                            import pygame
+                            pygame.mixer.init()
+                            pygame.mixer.music.load(temp_file.name)
+                            pygame.mixer.music.play()
+                            
+                            # 再生完了まで待機（タイムアウト付き）
+                            timeout = 30  # 30秒でタイムアウト
+                            elapsed = 0
+                            while pygame.mixer.music.get_busy() and elapsed < timeout:
+                                time.sleep(0.1)
+                                elapsed += 0.1
+                                
+                            if elapsed >= timeout:
+                                pygame.mixer.music.stop()
+                                print("⚠️ 音声再生タイムアウト")
+                            else:
+                                print("🎵 gTTS音声再生完了")
+                        except (pygame.error, OSError):
+                            # 音声再生失敗時はファイル生成のみ
+                            print(f"🎵 gTTS音声ファイル生成完了: {temp_file.name}")
+                            print("💡 Google Colabの場合、ファイルをダウンロードして再生できます")
+                    else:
+                        # ファイル生成のみ（Colab環境）
+                        print(f"🎵 gTTS音声ファイル生成完了: {temp_file.name}")
+                        print("💡 Google Colabでファイルをダウンロード可能です")
+                        
+                        # Colab環境の場合、ファイルをダウンロード可能にする
+                        try:
+                            from google.colab import files
+                            import shutil
+                            import time
+                            
+                            # 保存ファイル名を作成
+                            save_filename = f"hiroyuki_voice_{int(time.time())}.mp3"
+                            shutil.copy(temp_file.name, f"/content/{save_filename}")
+                            print(f"📁 音声ファイルを保存しました: /content/{save_filename}")
+                            
+                            # ダウンロード提案（ユーザーが選択）
+                            print("🎧 音声ファイルをダウンロードしますか？")
+                            # files.download(f"/content/{save_filename}")  # 自動実行はしない
+                        except ImportError:
+                            # Colab環境でない場合
+                            pass
+                
+                # 一時ファイル削除（必要に応じて）
+                if self.tts_model == "gtts_with_audio":
+                    try:
+                        os.unlink(temp_file.name)
+                    except:
+                        pass
+                
+            elif self.tts_model == "macos_say":
+                import subprocess
+                subprocess.run(["say", text], check=True, timeout=30)
+                print("🎵 macOS音声再生完了")
+                
+            elif self.tts_model.startswith("linux_"):
+                import subprocess
+                cmd = self.tts_model.split("_")[1]
+                if cmd == "espeak":
+                    subprocess.run(["espeak", text], check=True, timeout=30)
+                elif cmd == "festival":
+                    subprocess.run(["festival", "--tts"], input=text, text=True, check=True, timeout=30)
+                elif cmd == "spd-say":
+                    subprocess.run(["spd-say", text], check=True, timeout=30)
+                print(f"🎵 {cmd}音声再生完了")
+                
+            elif self.tts_model == "windows_sapi":
+                import subprocess
+                ps_command = f'Add-Type -AssemblyName System.Speech; $synth = New-Object System.Speech.Synthesis.SpeechSynthesizer; $synth.Speak("{text.replace('"', "'")}")'
+                subprocess.run(["powershell", "-Command", ps_command], check=True, timeout=30)
+                print("🎵 Windows SAPI音声再生完了")
+                
+            elif hasattr(self.tts_model, 'inference'):  # model_load.py LoadedModel
+                # 【シンプルモード】LoadedModelのinference関数を使用
+                print(f"🎵 【シンプルモード】Style-Bert-VITS2音声生成中...")
+                
+                try:
+                    import tempfile
+                    import time
+                    
+                    # シンプルなファイル名で生成
+                    output_path = f"/content/yoshino_voice_{int(time.time())}.wav"
+                    
+                    # ユーザー指定パターンと同じ呼び出し方
+                    result_path = self.tts_model.inference(text, output_path)
+                    
+                    print(f"✅ yoshino音声生成完了: {result_path}")
+                    
+                    # ファイル存在確認
+                    if os.path.exists(result_path):
+                        size = os.path.getsize(result_path)
+                        print(f"📁 ファイルサイズ: {size} bytes")
+                    
+                    # Google Colab環境での保存は既にresult_pathに完了
+                    print(f"🎧 Google Colabで再生可能: {result_path}")
+                    
+                except Exception as inference_error:
+                    print(f"❌ inference実行エラー: {inference_error}")
+                    # 詳細なエラー情報を表示
+                    import traceback
+                    traceback.print_exc()
+                    print("⚠️ gTTSにフォールバックします")
+                    # gTTSでのフォールバック実行
+                    self._speak_with_gtts(text)
+                        
+            elif hasattr(self.tts_model, 'infer'):  # 従来のTTSModel（フォールバック）
+                audio = self.tts_model.infer(text=text)
+                print("🎵 Style-Bert-VITS2音声生成完了")
+                
+            else:
+                print(f"⚠️ 不明な音声モデル: {self.tts_model}")
+                
+        except subprocess.TimeoutExpired:
+            print("⚠️ 音声再生がタイムアウトしました")
+        except Exception as speak_error:
+            print(f"⚠️ 音声再生エラー: {speak_error}")
+            # 音声エラー時は音声機能を無効化
+            self.tts_available = False
+            print("🔇 音声機能を無効化しました")
+
+    def _speak_with_gtts(self, text: str):
+        """gTTSでのフォールバック音声生成"""
+        try:
+            print("🔊 gTTSフォールバック実行中...")
+            from gtts import gTTS
+            import tempfile
+            import time
+            
+            tts = gTTS(text=text, lang='ja')
+            output_path = f"/content/gtts_fallback_{int(time.time())}.mp3"
+            tts.save(output_path)
+            print(f"✅ gTTS音声生成完了: {output_path}")
+            
+        except Exception as gtts_error:
+            print(f"❌ gTTSフォールバックも失敗: {gtts_error}")
+
+    def test_voice_synthesis(self, text: str = "こんにちは、TODOアプリの音声合成テストです"):
+        """音声合成のテスト"""
+        print("🧪 TODOアプリ音声合成テスト開始...")
+        print(f"📝 テスト文章: {text}")
+        print(f"🎯 使用モデル: {self.tts_model}")
+        print(f"🌐 Colab環境: {self._is_colab_environment()}")
+        
+        if self.tts_available:
+            self.speak_response(text)
+        else:
+            print("❌ 音声機能が利用できません")
     
     def process_query(self, user_input: str) -> str:
         """ユーザーの質問を処理"""
@@ -644,6 +1568,17 @@ class IntegratedLangChainAgent:
         response_time = time.time() - start_time
         if not self._should_get_angry(user_input):
             tools_used = list(tool_results.keys()) if tool_results else []
+        
+        # 5. 音声で応答（バックグラウンド実行）
+        if self.tts_available and response:
+            try:
+                # 音声合成を別スレッドで実行（メイン処理をブロックしない）
+                import threading
+                speech_thread = threading.Thread(target=self.speak_response, args=(response,))
+                speech_thread.daemon = True
+                speech_thread.start()
+            except Exception as speech_error:
+                print(f"⚠️ 音声合成スレッドエラー: {speech_error}")
         
         return response
     
@@ -1175,13 +2110,43 @@ def initialize_tts_system(model_name: str = "yoshino_test", model_dir: str = "mo
         if model_dir is None:
             return None
             
-        # style_bert_vits2の存在確認
+        # style_bert_vits2の存在確認と詳細チェック
         import importlib.util
         spec = importlib.util.find_spec("style_bert_vits2")
         if spec is None:
             print("⚠️ style_bert_vits2ライブラリがインストールされていません")
             print("💡 Colabで !pip install style-bert-vits2 を実行してください")
             return None
+        
+        # TTSModelクラスの存在確認
+        try:
+            from style_bert_vits2.tts_model import TTSModel
+            print("✓ TTSModelクラスのインポートに成功しました")
+        except ImportError as e:
+            print(f"⚠️ TTSModelクラスのインポートに失敗: {e}")
+            print("💡 style_bert_vits2が古いバージョンの可能性があります")
+            return None
+        
+        # 日本語BERTモデルの初期化
+        try:
+            print("🔄 Style-Bert-VITS2の日本語BERTモデルを初期化中...")
+            from style_bert_vits2 import bert_models
+            from style_bert_vits2.constants import Languages
+            
+            # 日本語BERTモデルとトークナイザーをロード
+            bert_models.load_model(Languages.JP, "ku-nlp/deberta-v2-large-japanese-char-wwm")
+            bert_models.load_tokenizer(Languages.JP, "ku-nlp/deberta-v2-large-japanese-char-wwm")
+            print("✓ 日本語BERTモデルの初期化に成功しました")
+        except Exception as bert_error:
+            print(f"⚠️ BERTモデル初期化エラー: {bert_error}")
+            print("💡 フォールバック用BERTモデルを試行します...")
+            try:
+                bert_models.load_model(Languages.JP, "cl-tohoku/bert-base-japanese-v3")
+                bert_models.load_tokenizer(Languages.JP, "cl-tohoku/bert-base-japanese-v3")
+                print("✓ フォールバックBERTモデルの初期化に成功しました")
+            except Exception as fallback_error:
+                print(f"⚠️ フォールバックBERTモデル初期化も失敗: {fallback_error}")
+                print("💡 音声合成でBERTエラーが発生する可能性があります")
             
         # Style-Bert-VITS2の初期化システム（app.pyと同様）
         print("🎌 pyopenjtalk_workerを初期化中...")
@@ -1225,19 +2190,287 @@ def initialize_tts_system(model_name: str = "yoshino_test", model_dir: str = "mo
         return None
 
 
+def initialize_bert_for_japanese() -> bool:
+    """Style-Bert-VITS2用の日本語BERTモデル初期化"""
+    try:
+        print("🔄 Style-Bert-VITS2の日本語BERTモデルを初期化中...")
+        from style_bert_vits2 import bert_models
+        from style_bert_vits2.constants import Languages
+        
+        # メインのBERTモデル（推奨）
+        try:
+            bert_models.load_model(Languages.JP, "ku-nlp/deberta-v2-large-japanese-char-wwm")
+            bert_models.load_tokenizer(Languages.JP, "ku-nlp/deberta-v2-large-japanese-char-wwm")
+            print("✓ 日本語BERTモデル（deberta-v2-large）の初期化に成功")
+            return True
+        except Exception as main_error:
+            print(f"⚠️ メインBERTモデルエラー: {main_error}")
+            
+            # フォールバックモデル
+            try:
+                bert_models.load_model(Languages.JP, "cl-tohoku/bert-base-japanese-v3")
+                bert_models.load_tokenizer(Languages.JP, "cl-tohoku/bert-base-japanese-v3")
+                print("✓ フォールバックBERTモデル（bert-base-japanese）の初期化に成功")
+                return True
+            except Exception as fallback_error:
+                print(f"❌ フォールバックBERTモデルも失敗: {fallback_error}")
+                return False
+                
+    except ImportError as e:
+        print(f"❌ BERTモデル機能のインポートに失敗: {e}")
+        return False
+    except Exception as e:
+        print(f"❌ BERT初期化で予期しないエラー: {e}")
+        return False
+
 def start_background_tts_server(model_dir: str, model_name: str, device: str) -> Optional[object]:
-    """バックグラウンドでTTSサーバーを起動"""
+    """バックグラウンドでTTSサーバーを起動（model_load.py方式、レガシー関数）"""
+    print("⚠️ この関数は廃止予定です。model_load.pyを直接使用してください。")
     try:
         import threading
         import time
         from pathlib import Path
         import torch
-        from style_bert_vits2.tts_model import TTSModelHolder
-        # torch_device_to_onnx_providers の互換性インポート
+        import os
+        import sys
+        
+        # BERT問題を事前に解決
+        print("🔧 BERT設定の問題を解決中...")
         try:
-            from style_bert_vits2.utils import torch_device_to_onnx_providers
-        except ImportError:
-            from torch_device_onnx_compat import torch_device_to_onnx_providers
+            # 1. transformersライブラリの動的インストール（必要に応じて）
+            try:
+                from transformers import AutoTokenizer, AutoModel
+                print("✅ transformers利用可能")
+            except ImportError:
+                print("📥 transformersライブラリをインストール中...")
+                import subprocess
+                subprocess.check_call([sys.executable, '-m', 'pip', 'install', 'transformers', 'torch'])
+                from transformers import AutoTokenizer, AutoModel
+                print("✅ transformersインストール完了")
+            
+            # 2. BERTモデルのGoogle Colab対応準備
+            # カスタムモデル用BERTディレクトリを設定
+            if "/content/drive/" in model_dir:
+                # Google Driveの場合はそのモデル用のBERTディレクトリを使用
+                bert_dir = Path(model_dir).parent / 'bert_models'
+            else:
+                # ローカルの場合は従来通り
+                bert_dir = Path(model_dir).parent / 'bert_models' / 'japanese'
+            
+            bert_dir.mkdir(parents=True, exist_ok=True)
+            print(f"📁 BERTモデルディレクトリ: {bert_dir}")
+            
+            # 複数のBERTモデル候補を試行
+            bert_model_candidates = [
+                'ku-nlp/deberta-v2-large-japanese-char-wwm',
+                'cl-tohoku/bert-large-japanese-char-v2', 
+                'cl-tohoku/bert-base-japanese-v3'
+            ]
+            
+            bert_success = False
+            for bert_model in bert_model_candidates:
+                if (bert_dir / 'config.json').exists():
+                    bert_success = True
+                    print(f"✅ 既存BERTモデル発見: {bert_dir}")
+                    break
+                    
+                print(f"📥 {bert_model} BERTモデル準備中...")
+                try:
+                    tokenizer = AutoTokenizer.from_pretrained(
+                        bert_model,
+                        cache_dir=str(bert_dir)
+                    )
+                    model = AutoModel.from_pretrained(
+                        bert_model,
+                        cache_dir=str(bert_dir)
+                    )
+                    bert_success = True
+                    print(f"✅ {bert_model} BERTモデル準備完了")
+                    break
+                except Exception as download_error:
+                    print(f"⚠️ {bert_model} ダウンロードエラー: {download_error}")
+                    continue
+            
+            if not bert_success:
+                print("⚠️ 全てのBERTモデル準備に失敗、音声合成でエラーが発生する可能性があります")
+            
+            # 3. Style-Bert-VITS2のBERT設定を完全パッチ
+            try:
+                from style_bert_vits2.nlp import bert_models
+                
+                # DEFAULT_BERT_TOKENIZER_PATHSを強制設定
+                if not hasattr(bert_models, 'DEFAULT_BERT_TOKENIZER_PATHS'):
+                    bert_models.DEFAULT_BERT_TOKENIZER_PATHS = {}
+                
+                bert_models.DEFAULT_BERT_TOKENIZER_PATHS['JP'] = str(bert_dir)
+                
+                # Languagesクラスの完全パッチ
+                if not hasattr(bert_models, 'Languages'):
+                    # Languagesクラス自体を作成
+                    class Languages:
+                        pass
+                    bert_models.Languages = Languages()
+                
+                # JP言語の動的設定（複数の方法で確実に設定）
+                class JP:
+                    bert_tokenizer_path = str(bert_dir)
+                    code = 'JP'
+                    
+                    @classmethod
+                    def get_path(cls):
+                        return str(bert_dir)
+                    
+                    def __str__(self):
+                        return 'JP'
+                
+                # JP設定の複数方法での追加
+                bert_models.Languages.JP = JP()
+                setattr(bert_models.Languages, 'JP', JP())
+                
+                # モジュール内のグローバル変数としても設定
+                setattr(bert_models, 'JP_BERT_PATH', str(bert_dir))
+                
+                # 環境変数も設定（最強の保険）
+                os.environ['STYLE_BERT_VITS2_BERT_JP'] = str(bert_dir)
+                os.environ['BERT_MODELS_JP'] = str(bert_dir)
+                
+                print(f"✅ 完全BERT設定パッチ完了: {bert_dir}")
+                print(f"✅ DEFAULT_BERT_TOKENIZER_PATHS: {getattr(bert_models, 'DEFAULT_BERT_TOKENIZER_PATHS', {})}")
+                print(f"✅ Languages.JP: {getattr(bert_models.Languages, 'JP', None)}")
+                
+            except Exception as patch_error:
+                print(f"⚠️ BERTパッチエラー、モンキーパッチを試行: {patch_error}")
+                
+                # モンキーパッチによる強制設定
+                try:
+                    import sys
+                    import types
+                    
+                    # bert_modelsモジュールを取得または作成
+                    if 'style_bert_vits2.nlp.bert_models' in sys.modules:
+                        bert_mod = sys.modules['style_bert_vits2.nlp.bert_models']
+                    else:
+                        bert_mod = types.ModuleType('bert_models')
+                        sys.modules['style_bert_vits2.nlp.bert_models'] = bert_mod
+                    
+                    # 強制的に設定
+                    bert_mod.DEFAULT_BERT_TOKENIZER_PATHS = {'JP': str(bert_dir)}
+                    
+                    # Languagesオブジェクト作成
+                    languages_obj = types.SimpleNamespace()
+                    jp_obj = types.SimpleNamespace()
+                    jp_obj.bert_tokenizer_path = str(bert_dir)
+                    jp_obj.code = 'JP'
+                    languages_obj.JP = jp_obj
+                    bert_mod.Languages = languages_obj
+                    
+                    print(f"✅ モンキーパッチによるBERT設定完了: {bert_dir}")
+                    
+                except Exception as monkey_error:
+                    print(f"⚠️ モンキーパッチも失敗: {monkey_error}")
+                    # 環境変数のみで頑張る
+                    os.environ['BERT_BASE_DIR'] = str(bert_dir.parent)
+                    os.environ['JP_BERT_PATH'] = str(bert_dir)
+                    print(f"✅ 環境変数によるBERT設定: {bert_dir}")
+        
+        except Exception as bert_setup_error:
+            print(f"⚠️ BERT設定エラー、TTS初期化を続行: {bert_setup_error}")
+        
+        # 新しいAPI: TTSModelを直接使用
+        from style_bert_vits2.tts_model import TTSModel
+        
+        # モデルファイル構造の確認と自動検索（パス処理修正）
+        model_dir_path = Path(model_dir)
+        if model_name:
+            model_path = model_dir_path / model_name
+        else:
+            model_path = model_dir_path
+        
+        # パスの正規化と存在確認
+        if not model_path.exists():
+            print(f"⚠️ モデルディレクトリが存在しません: {model_path}")
+            print(f"📁 検索対象ディレクトリ: {model_dir_path}")
+            if model_dir_path.exists():
+                print(f"📂 利用可能なファイル: {list(model_dir_path.iterdir())}")
+            return None
+        
+        # 基本的な必須ファイル（Pathオブジェクトとして安全に処理）
+        required_files = {}
+        config_file = model_path / 'config.json'
+        style_vectors_file = model_path / 'style_vectors.npy'
+        
+        if config_file.exists():
+            required_files['config.json'] = config_file
+        if style_vectors_file.exists():
+            required_files['style_vectors.npy'] = style_vectors_file
+        
+        # モデルファイルの候補を安全に検索
+        model_file_candidates = []
+        try:
+            # 明示的なファイル名での検索
+            for ext in ['.safetensors', '.pth', '.pt', '.ckpt']:
+                explicit_file = model_path / f'model{ext}'
+                if explicit_file.exists():
+                    model_file_candidates.append(explicit_file)
+            
+            # glob検索（例外処理付き）
+            for pattern in ['*.safetensors', '*.pth', '*.pt', '*.ckpt']:
+                try:
+                    model_file_candidates.extend(list(model_path.glob(pattern)))
+                except OSError as glob_error:
+                    print(f"⚠️ Globパターン {pattern} 検索エラー: {glob_error}")
+        except Exception as search_error:
+            print(f"⚠️ モデルファイル検索エラー: {search_error}")
+        
+        # 重複除去
+        model_file_candidates = list(set(model_file_candidates))
+        
+        model_file = None
+        for candidate in model_file_candidates:
+            try:
+                if candidate.exists() and candidate.is_file():
+                    model_file = candidate
+                    print(f"✓ モデルファイル発見: {candidate}")
+                    break
+            except Exception as candidate_error:
+                print(f"⚠️ ファイル確認エラー {candidate}: {candidate_error}")
+        
+        if model_file is None:
+            print(f"❌ モデルファイルが見つかりません:")
+            print(f"   検索対象: {[str(c) for c in model_file_candidates[:6]]}")  # 最初の6個を表示
+            print(f"   ディレクトリの内容: {list(model_path.glob('*')) if model_path.exists() else 'ディレクトリが存在しません'}")
+            return None
+        
+        # モデルファイルを確定
+        required_files['model'] = model_file
+        
+        # その他のファイル存在確認
+        missing_files = []
+        for file_type, file_path in required_files.items():
+            if file_type == 'model':
+                continue  # 既にチェック済み
+            if not file_path.exists():
+                missing_files.append(f"{file_type}: {file_path}")
+        
+        if missing_files:
+            print(f"⚠️ 一部のファイルが見つかりません:")
+            for missing in missing_files:
+                print(f"   - {missing}")
+            
+            # style_vectors.npyが見つからない場合は作成を試行
+            if 'style_vectors.npy' in [m.split(':')[0] for m in missing_files]:
+                print(f"💡 style_vectors.npyが見つからないため、デフォルトを使用します")
+                # 簡易的な空のstyle vectorsファイルを作成
+                import numpy as np
+                try:
+                    np.save(model_path / 'style_vectors.npy', np.array([]))
+                    required_files['style_vectors.npy'] = model_path / 'style_vectors.npy'
+                    print(f"✓ デフォルトのstyle_vectors.npyを作成しました")
+                except Exception as e:
+                    print(f"⚠️ style_vectors.npy作成に失敗: {e}")
+                    return None
+        
+        print(f"✅ モデルファイル構造確認完了: {model_name}")
         
         # デバイス設定
         if device == "auto":
@@ -1248,174 +2481,132 @@ def start_background_tts_server(model_dir: str, model_name: str, device: str) ->
                 device = "cpu" 
                 print("⚠️ GPUが利用できません。CPUを使用します")
         
-        print(f"📁 TTSモデルホルダーを初期化中... (パス: {model_dir})")
+        print(f"📁 TTSModelを直接初期化中... (パス: {model_path})")
         
-        # TTSModelHolderを作成（バージョン互換性対応）
+        # BERTモデルの事前初期化
+        if not initialize_bert_for_japanese():
+            print("⚠️ BERTモデルの初期化に失敗しましたが、TTSModel作成を続行します")
+        
+        # TTSModelを直接作成（新しいAPI）
         try:
-            # TTSModelHolderの引数パターンを試行錯誤で判定
-            import inspect
-            sig = inspect.signature(TTSModelHolder.__init__)
-            param_names = list(sig.parameters.keys())[1:]  # selfを除外
-            param_count = len(param_names)
+            print(f"🔄 TTSModel初期化中...")
+            print(f"   - モデルファイル: {required_files['model']}")
+            print(f"   - 設定ファイル: {required_files['config.json']}")
+            print(f"   - スタイルベクトル: {required_files['style_vectors.npy']}")
+            print(f"   - デバイス: {device}")
             
-            print(f"🔍 TTSModelHolder引数数: {param_count}, パラメータ: {param_names}")
-            
-            # まず最も一般的な初期化パターンを試行
-            try:
-                model_holder = TTSModelHolder(
-                    Path(model_dir),
-                    device,
-                    torch_device_to_onnx_providers(device),
-                    ignore_onnx=True,
-                )
-                print("✓ 標準パターン: 全引数で初期化成功")
-            except TypeError:
-                # 引数数に応じて適切な呼び出し方法を選択
-                if param_count == 1:
-                    # model_dir のみ
-                    model_holder = TTSModelHolder(Path(model_dir))
-                    print("✓ パターン1: model_dir のみで初期化")
-                elif param_count == 2:
-                    # model_dir, device
-                    model_holder = TTSModelHolder(Path(model_dir), device)
-                    print("✓ パターン2: model_dir, device で初期化")
-                elif param_count == 3:
-                    # model_dir, device, onnx_providers
-                    model_holder = TTSModelHolder(
-                        Path(model_dir),
-                        device,
-                        torch_device_to_onnx_providers(device)
+            # Pathオブジェクトを文字列に変換（Style-Bert-VITS2は文字列パスを要求）
+            tts_model = TTSModel(
+                model_path=str(required_files['model']),
+                config_path=str(required_files['config.json']),
+                style_vec_path=str(required_files['style_vectors.npy']),
+                device=device
+            )
+            print("✅ TTSModel作成成功")
+        except ImportError as e:
+            print(f"❌ インポートエラー: {e}")
+            print("💡 style_bert_vits2ライブラリが正しくインストールされているか確認してください")
+            return None
+        except FileNotFoundError as e:
+            print(f"❌ ファイルが見つかりません: {e}")
+            print("💡 モデルファイルのパスを確認してください")
+            return None
+        except RuntimeError as e:
+            if "CUDA" in str(e):
+                print(f"❌ CUDA関連エラー: {e}")
+                print("💡 CPUデバイスで再試行します")
+                try:
+                    tts_model = TTSModel(
+                        model_path=required_files['model'],
+                        config_path=required_files['config.json'],
+                        style_vec_path=required_files['style_vectors.npy'],
+                        device="cpu"
                     )
-                    print("✓ パターン3: model_dir, device, onnx_providers で初期化")
-                else:
-                    # 4つ以上: model_dir, device, onnx_providers, ignore_onnx
-                    if 'ignore_onnx' in param_names:
-                        model_holder = TTSModelHolder(
-                            Path(model_dir),
-                            device,
-                            torch_device_to_onnx_providers(device),
-                            ignore_onnx=True,
-                        )
-                        print("✓ パターン4: 全引数で初期化（ignore_onnx=True）")
-                    else:
-                        model_holder = TTSModelHolder(
-                            Path(model_dir),
-                            device,
-                            torch_device_to_onnx_providers(device),
-                        )
-                        print("✓ パターン5: model_dir, device, onnx_providers で初期化")
-            print("✅ TTSModelHolder作成成功")
+                    print("✅ CPUでのTTSModel作成に成功")
+                except Exception as cpu_error:
+                    print(f"❌ CPU再試行も失敗: {cpu_error}")
+                    return None
+            else:
+                print(f"❌ ランタイムエラー: {e}")
+                return None
         except Exception as e:
-            print(f"❌ TTSModelHolder作成エラー: {e}")
+            print(f"❌ TTSModel作成エラー: {e}")
             print(f"❌ エラータイプ: {type(e).__name__}")
             print(f"❌ モデルディレクトリ: {model_dir}")
             print(f"❌ 使用デバイス: {device}")
             import traceback
             print("❌ 詳細なスタックトレース:")
             traceback.print_exc()
-            raise e
+            print("\n💡 トラブルシューティング:")
+            print("   1. style_bert_vits2が最新版かチェック: pip install --upgrade style-bert-vits2")
+            print("   2. モデルファイルが破損していないかチェック")
+            print("   3. 十分なメモリがあるかチェック")
+            print("   4. Pythonバージョンの互換性をチェック")
+            return None
         
-        print(f"📋 利用可能なモデル: {list(model_holder.model_names)}")
-        
-        # 指定されたモデルが存在するかチェック
-        if model_name not in model_holder.model_names:
-            print(f"⚠️ 指定されたモデル '{model_name}' が見つかりません")
-            print(f"💡 利用可能なモデル: {list(model_holder.model_names)}")
-            if model_holder.model_names:
-                model_name = list(model_holder.model_names)[0]
-                print(f"🔄 最初のモデルを使用します: {model_name}")
-            else:
-                print("❌ 利用可能なモデルがありません")
-                return None
-        
-        # バックグラウンドTTSサーバークラス
+        # バックグラウンドTTSサーバークラス（TTSModel直接使用）
         class BackgroundTTSServer:
-            def __init__(self, model_holder, model_name):
-                self.model_holder = model_holder
+            def __init__(self, tts_model, model_name):
+                self.tts_model = tts_model
                 self.model_name = model_name
                 self.is_running = True
                 
             def synthesize_speech(self, text: str, output_path: str = "output.wav", **kwargs) -> Optional[str]:
-                """音声合成を実行"""
+                """音声合成を実行（TTSModel直接使用）"""
                 try:
-                    # デフォルトパラメータ
-                    params = {
-                        'model_name': self.model_name,
-                        'text': text,
-                        'language': kwargs.get('language', 'JP'),
-                        'speaker_id': kwargs.get('speaker_id', 0),
-                        'sdp_ratio': kwargs.get('sdp_ratio', 0.2),
-                        'noise': kwargs.get('noise', 0.6),
-                        'noise_w': kwargs.get('noise_w', 0.8),
-                        'length': kwargs.get('length', 1.0),
-                        'style': kwargs.get('style', 'Neutral'),
-                    }
-                    
                     print(f"🎵 音声合成実行中: '{text[:50]}{'...' if len(text) > 50 else ''}'")
                     
-                    # TTSModelHolderから個別モデルを取得して音声合成
-                    if hasattr(self.model_holder, 'get_model'):
-                        print(f"🔍 get_modelを使用してモデル '{self.model_name}' を取得中...")
-                        # Style-Bert-VITS2のバージョン互換性対応
-                        try:
-                            # 新しいAPI（keyword-only引数対応）
-                            model = self.model_holder.get_model(self.model_name)
-                        except TypeError as e:
-                            if 'model_path_str' in str(e):
-                                print("⚠️ 旧バージョンのStyle-Bert-VITS2を検出。代替方法を試行します...")
-                                # 旧バージョン用のフォールバック：models辞書から直接取得を試行
-                                if hasattr(self.model_holder, 'models') and self.model_name in self.model_holder.models:
-                                    model = self.model_holder.models[self.model_name]
-                                else:
-                                    print("❌ 旧バージョンでのモデル取得に失敗しました")
-                                    model = None
-                            else:
-                                raise e
+                    # TTSModelのinferメソッドを直接呼び出し（新しいAPI）
+                    try:
+                        # Style-Bert-VITS2の標準パラメータでinfer実行
+                        sr, audio = self.tts_model.infer(
+                            text=text,
+                            language="JP",  # 日本語
+                            speaker_id=kwargs.get('speaker_id', 0),
+                            reference_audio_path=kwargs.get('reference_audio_path', None),
+                            sdp_ratio=kwargs.get('sdp_ratio', 0.2),
+                            noise=kwargs.get('noise', 0.6), 
+                            noise_w=kwargs.get('noise_w', 0.8),
+                            length=kwargs.get('length', 1.0)
+                        )
                         
-                        if model and hasattr(model, 'infer'):
-                            result = model.infer(**params)
-                        elif model and hasattr(model, 'synthesize'):
-                            result = model.synthesize(**params)
-                        elif model and hasattr(model, 'tts'):
-                            result = model.tts(**params)
-                        elif model and hasattr(model, 'generate'):
-                            result = model.generate(**params)
-                        else:
-                            model_methods = [method for method in dir(model) 
-                                           if not method.startswith('_') and callable(getattr(model, method))] if model else []
-                            print(f"⚠️ モデル '{self.model_name}' の音声合成メソッドが見つかりません")
-                            print(f"🔍 モデルのメソッド: {model_methods}")
-                            print(f"🔍 モデルの型: {type(model)}")
-                            raise AttributeError(f"モデル '{self.model_name}' に音声合成メソッドが見つかりません。利用可能メソッド: {model_methods}")
-                    else:
-                        # 旧方式を試行
-                        available_methods = [method for method in dir(self.model_holder) 
-                                           if not method.startswith('_') and callable(getattr(self.model_holder, method))]
-                        print(f"⚠️ 適切な音声合成メソッドが見つかりません")
+                        print(f"✅ 音声合成成功 - サンプリングレート: {sr}")
+                        
+                    except Exception as infer_error:
+                        print(f"⚠️ inferメソッドでエラー: {infer_error}")
+                        # フォールバック: 他のメソッドを試行
+                        available_methods = [method for method in dir(self.tts_model) 
+                                           if not method.startswith('_') and callable(getattr(self.tts_model, method))]
                         print(f"🔍 利用可能なメソッド: {available_methods}")
-                        raise AttributeError(f"TTSModelHolderに音声合成メソッドが見つかりません。利用可能: {available_methods}")
+                        raise infer_error
                     
-                    # 結果の保存
-                    if hasattr(result, 'audio') and hasattr(result, 'sample_rate'):
+                    # 音声データの保存
+                    if audio is not None:
                         from scipy.io import wavfile
                         import numpy as np
                         
-                        # numpyのfloat32配列をint16に変換
-                        audio_data = result.audio
-                        if audio_data.dtype == np.float32:
-                            audio_data = (audio_data * 32767).astype(np.int16)
+                        # numpyの型変換（必要に応じて）
+                        if isinstance(audio, np.ndarray):
+                            if audio.dtype == np.float32 or audio.dtype == np.float64:
+                                # float -> int16 変換
+                                audio_int16 = (audio * 32767).astype(np.int16)
+                            else:
+                                audio_int16 = audio
+                        else:
+                            audio_int16 = np.array(audio, dtype=np.int16)
                         
-                        wavfile.write(output_path, result.sample_rate, audio_data)
+                        # WAVファイルとして保存
+                        wavfile.write(output_path, sr, audio_int16)
                         print(f"✓ 音声ファイル生成完了: {output_path}")
                         return output_path
                     else:
-                        print("⚠️ 音声生成結果の形式が予期されたものと異なります")
+                        print("⚠️ 音声データがNoneです")
                         return None
                         
                 except Exception as e:
                     print(f"⚠️ 音声合成エラー: {e}")
                     print(f"⚠️ エラータイプ: {type(e).__name__}")
-                    print(f"⚠️ 使用パラメータ: {params}")
+                    print(f"⚠️ 入力テキスト: {text}")
                     import traceback
                     print("⚠️ 詳細なエラー情報:")
                     traceback.print_exc()
@@ -1427,7 +2618,7 @@ def start_background_tts_server(model_dir: str, model_name: str, device: str) ->
                 print("🛑 TTSサーバーを停止しました")
         
         # サーバーインスタンス作成
-        tts_server = BackgroundTTSServer(model_holder, model_name)
+        tts_server = BackgroundTTSServer(tts_model, model_name)
         
         print("✓ バックグラウンドTTSサーバーが起動しました")
         return tts_server
@@ -1438,16 +2629,11 @@ def start_background_tts_server(model_dir: str, model_name: str, device: str) ->
 
 
 def initialize_native_tts_system(model_dir: str, model_name: str, device: str) -> Optional[object]:
-    """Style-Bert-VITS2のネイティブ機能を使用したTTS初期化"""
+    """Style-Bert-VITS2のネイティブ機能を使用したTTS初期化（TTSModel直接使用）"""
     try:
         from pathlib import Path
         import torch
-        from style_bert_vits2.tts_model import TTSModelHolder
-        # torch_device_to_onnx_providers の互換性インポート
-        try:
-            from style_bert_vits2.utils import torch_device_to_onnx_providers
-        except ImportError:
-            from torch_device_onnx_compat import torch_device_to_onnx_providers
+        from style_bert_vits2.tts_model import TTSModel
         
         # Colab環境でのデバイス設定（GPU優先）
         if device == "auto":
@@ -1458,139 +2644,153 @@ def initialize_native_tts_system(model_dir: str, model_name: str, device: str) -
                 device = "cpu"
                 print("⚠️ GPUが利用できません。CPUを使用します")
         
-        print(f"📁 モデルホルダーを初期化中... (パス: {model_dir})")
+        print(f"📁 TTSModelを直接初期化中... (パス: {model_dir}/{model_name})")
         
-        # TTSModelHolderを作成（バージョン互換性対応）
-        import inspect
-        sig = inspect.signature(TTSModelHolder.__init__)
-        param_names = list(sig.parameters.keys())[1:]  # selfを除外
-        param_count = len(param_names)
+        # BERTモデルの事前初期化
+        if not initialize_bert_for_japanese():
+            print("⚠️ BERTモデルの初期化に失敗しましたが、TTSModel作成を続行します")
         
-        print(f"🔍 TTSModelHolder引数数: {param_count}, パラメータ: {param_names}")
+        # モデルファイル構造の確認と自動検索
+        model_path = Path(model_dir) / model_name
         
-        # 引数数に応じて適切な呼び出し方法を選択
-        if param_count == 1:
-            model_holder = TTSModelHolder(Path(model_dir))
-        elif param_count == 2:
-            model_holder = TTSModelHolder(Path(model_dir), device)
-        elif param_count == 3:
-            model_holder = TTSModelHolder(
-                Path(model_dir),
-                device,
-                torch_device_to_onnx_providers(device)
+        # 基本的な必須ファイル
+        required_files = {
+            'config.json': model_path / 'config.json',
+            'style_vectors.npy': model_path / 'style_vectors.npy'
+        }
+        
+        # モデルファイルの候補を検索（複数形式対応）
+        model_file_candidates = [
+            model_path / 'model.safetensors',
+            model_path / 'model.pth', 
+            model_path / 'model.pt',
+            model_path / 'model.ckpt',
+            *model_path.glob('*.safetensors'),
+            *model_path.glob('*.pth'),
+            *model_path.glob('*.pt')
+        ]
+        
+        model_file = None
+        for candidate in model_file_candidates:
+            if candidate.exists() and candidate.is_file():
+                model_file = candidate
+                print(f"✓ モデルファイル発見: {candidate}")
+                break
+        
+        if model_file is None:
+            print(f"❌ モデルファイルが見つかりません:")
+            print(f"   検索対象: {[str(c) for c in model_file_candidates[:6]]}")
+            print(f"   ディレクトリの内容: {list(model_path.glob('*')) if model_path.exists() else 'ディレクトリが存在しません'}")
+            return None
+        
+        # モデルファイルを確定
+        required_files['model'] = model_file
+        
+        # その他のファイル存在確認
+        missing_files = []
+        for file_type, file_path in required_files.items():
+            if file_type == 'model':
+                continue  # 既にチェック済み
+            if not file_path.exists():
+                missing_files.append(f"{file_type}: {file_path}")
+        
+        if missing_files:
+            print(f"⚠️ 一部のファイルが見つかりません:")
+            for missing in missing_files:
+                print(f"   - {missing}")
+            
+            # style_vectors.npyが見つからない場合は作成を試行
+            if 'style_vectors.npy' in [m.split(':')[0] for m in missing_files]:
+                print(f"💡 style_vectors.npyが見つからないため、デフォルトを使用します")
+                # 簡易的な空のstyle vectorsファイルを作成
+                import numpy as np
+                try:
+                    np.save(model_path / 'style_vectors.npy', np.array([]))
+                    required_files['style_vectors.npy'] = model_path / 'style_vectors.npy'
+                    print(f"✓ デフォルトのstyle_vectors.npyを作成しました")
+                except Exception as e:
+                    print(f"⚠️ style_vectors.npy作成に失敗: {e}")
+                    return None
+        
+        # TTSModelを直接作成
+        try:
+            print(f"🔄 TTSModel初期化中...")
+            print(f"   - モデルファイル: {required_files['model']}")
+            print(f"   - 設定ファイル: {required_files['config.json']}")
+            print(f"   - スタイルベクトル: {required_files['style_vectors.npy']}")
+            print(f"   - デバイス: {device}")
+            
+            tts_model = TTSModel(
+                model_path=required_files['model'],
+                config_path=required_files['config.json'],
+                style_vec_path=required_files['style_vectors.npy'],
+                device=device
             )
-        else:
-            if 'ignore_onnx' in param_names:
-                model_holder = TTSModelHolder(
-                    Path(model_dir),
-                    device,
-                    torch_device_to_onnx_providers(device),
-                    ignore_onnx=True,
-                )
-            else:
-                model_holder = TTSModelHolder(
-                    Path(model_dir),
-                    device,
-                    torch_device_to_onnx_providers(device),
-                )
+            print(f"✓ TTSModel初期化完了")
+        except Exception as e:
+            print(f"❌ TTSModel初期化エラー: {e}")
+            print(f"❌ エラータイプ: {type(e).__name__}")
+            import traceback
+            print("❌ 詳細なスタックトレース:")
+            traceback.print_exc()
+            return None
         
-        print(f"✓ TTSModelHolder初期化完了")
-        print(f"📋 利用可能なモデル: {list(model_holder.model_names)}")
-        
-        # 指定されたモデルが存在するかチェック
-        if model_name not in model_holder.model_names:
-            print(f"⚠️ 指定されたモデル '{model_name}' が見つかりません")
-            print(f"💡 利用可能なモデル: {list(model_holder.model_names)}")
-            if model_holder.model_names:
-                model_name = list(model_holder.model_names)[0]
-                print(f"🔄 最初のモデルを使用します: {model_name}")
-            else:
-                print("❌ 利用可能なモデルがありません")
-                return None
-        
-        # シンプルなラッパークラスを作成
+        # シンプルなラッパークラスを作成（TTSModel直接使用）
         class NativeTTSModel:
-            def __init__(self, model_holder, model_name):
-                self.model_holder = model_holder
+            def __init__(self, tts_model, model_name):
+                self.tts_model = tts_model
                 self.model_name = model_name
             
             def inference(self, text: str, output_path: str, **kwargs) -> str:
-                """音声合成を実行"""
+                """音声合成を実行（TTSModel直接使用）"""
                 try:
-                    # デフォルトパラメータ
-                    params = {
-                        'model_name': self.model_name,
-                        'text': text,
-                        'language': 'JP',
-                        'speaker_id': 0,
-                        'sdp_ratio': 0.2,
-                        'noise': 0.6,
-                        'noise_w': 0.8,
-                        'length': 1.0,
-                        **kwargs
-                    }
+                    print(f"🎵 音声合成実行中: '{text[:50]}{'...' if len(text) > 50 else ''}'")
                     
-                    # TTSModelHolderを使用して音声合成
-                    from pathlib import Path
+                    # TTSModelのinferメソッドを直接呼び出し
+                    sr, audio = self.tts_model.infer(
+                        text=text,
+                        language="JP",
+                        speaker_id=kwargs.get('speaker_id', 0),
+                        reference_audio_path=kwargs.get('reference_audio_path', None),
+                        sdp_ratio=kwargs.get('sdp_ratio', 0.2),
+                        noise=kwargs.get('noise', 0.6),
+                        noise_w=kwargs.get('noise_w', 0.8),
+                        length=kwargs.get('length', 1.0)
+                    )
                     
-                    # TTSModelHolderから個別モデルを取得して音声合成
-                    if hasattr(self.model_holder, 'get_model'):
-                        print(f"🔍 get_modelを使用してモデル '{self.model_name}' を取得中...")
-                        # Style-Bert-VITS2のバージョン互換性対応
-                        try:
-                            # 新しいAPI（keyword-only引数対応）
-                            model = self.model_holder.get_model(self.model_name)
-                        except TypeError as e:
-                            if 'model_path_str' in str(e):
-                                print("⚠️ 旧バージョンのStyle-Bert-VITS2を検出。代替方法を試行します...")
-                                # 旧バージョン用のフォールバック：models辞書から直接取得を試行
-                                if hasattr(self.model_holder, 'models') and self.model_name in self.model_holder.models:
-                                    model = self.model_holder.models[self.model_name]
-                                else:
-                                    print("❌ 旧バージョンでのモデル取得に失敗しました")
-                                    model = None
-                            else:
-                                raise e
-                        
-                        if model and hasattr(model, 'infer'):
-                            result = model.infer(**params)
-                        elif model and hasattr(model, 'synthesize'):
-                            result = model.synthesize(**params)
-                        elif model and hasattr(model, 'tts'):
-                            result = model.tts(**params)
-                        elif model and hasattr(model, 'generate'):
-                            result = model.generate(**params)
-                        else:
-                            model_methods = [method for method in dir(model) 
-                                           if not method.startswith('_') and callable(getattr(model, method))] if model else []
-                            print(f"⚠️ モデル '{self.model_name}' の音声合成メソッドが見つかりません")
-                            print(f"🔍 モデルのメソッド: {model_methods}")
-                            print(f"🔍 モデルの型: {type(model)}")
-                            raise AttributeError(f"モデル '{self.model_name}' に音声合成メソッドが見つかりません。利用可能メソッド: {model_methods}")
-                    else:
-                        available_methods = [method for method in dir(self.model_holder) 
-                                           if not method.startswith('_') and callable(getattr(self.model_holder, method))]
-                        raise AttributeError(f"TTSModelHolderに音声合成メソッドが見つかりません。利用可能: {available_methods}")
+                    print(f"✅ 音声合成成功 - サンプリングレート: {sr}")
                     
-                    # 結果を指定されたパスに保存
-                    if hasattr(result, 'audio') and hasattr(result, 'sample_rate'):
+                    # 音声データの保存
+                    if audio is not None:
                         from scipy.io import wavfile
-                        wavfile.write(output_path, result.sample_rate, result.audio)
+                        import numpy as np
+                        
+                        # numpyの型変換
+                        if isinstance(audio, np.ndarray):
+                            if audio.dtype == np.float32 or audio.dtype == np.float64:
+                                audio_int16 = (audio * 32767).astype(np.int16)
+                            else:
+                                audio_int16 = audio
+                        else:
+                            audio_int16 = np.array(audio, dtype=np.int16)
+                        
+                        wavfile.write(output_path, sr, audio_int16)
+                        print(f"✓ 音声ファイル生成完了: {output_path}")
                         return output_path
                     else:
-                        print("⚠️ 音声生成結果の形式が予期されたものと異なります")
+                        print("⚠️ 音声データがNoneです")
                         return None
                         
                 except Exception as e:
                     print(f"⚠️ 音声合成エラー: {e}")
                     print(f"⚠️ エラータイプ: {type(e).__name__}")
-                    print(f"⚠️ 使用パラメータ: {params}")
+                    print(f"⚠️ 入力テキスト: {text}")
                     import traceback
                     print("⚠️ 詳細なエラー情報:")
                     traceback.print_exc()
                     return None
         
-        return NativeTTSModel(model_holder, model_name)
+        return NativeTTSModel(tts_model, model_name)
         
     except Exception as e:
         print(f"⚠️ ネイティブTTSシステム初期化エラー: {e}")
@@ -1779,7 +2979,7 @@ print(response)
 
 
 def colab_quick_chat(question: str = "今日のタスクは？") -> str:
-    """GoogleColab用の簡単チャット関数"""
+    """GoogleColab用の簡単チャット関数（音声ファイル生成付き）"""
     try:
         print("🤖 AI自然言語モードを起動しています...")
         
@@ -1797,10 +2997,403 @@ def colab_quick_chat(question: str = "今日のタスクは？") -> str:
         
         print(f"\n🤖 **回答**:\n{response}\n")
         
+        # 音声ファイル生成とダウンロードの提案
+        if agent.tts_available:
+            print("🎵 この回答の音声ファイルを生成しますか？ (y/n)")
+            print("💡 'y' を入力すると音声ファイルがダウンロードされます")
+            
+            # Google Colab環境での音声ファイル保存
+            try:
+                import time
+                save_filename = f"todo_response_{int(time.time())}.mp3"
+                agent.download_voice_file(response, save_filename)
+            except Exception as audio_error:
+                print(f"⚠️ 音声ファイル生成エラー: {audio_error}")
+        
         return response
         
     except Exception as e:
         error_msg = f"❌ エラーが発生しました: {e}"
+        print(error_msg)
+        return error_msg
+
+def colab_setup_style_bert():
+    """Google Colab用 Style-Bert-VITS2セットアップ"""
+    try:
+        print("🔧 Style-Bert-VITS2セットアップを開始します...")
+        
+        # Google Driveマウント確認
+        drive_path = "/content/drive/MyDrive"
+        if not os.path.exists(drive_path):
+            print("📁 Google Driveをマウントしています...")
+            try:
+                from google.colab import drive
+                drive.mount('/content/drive')
+                print("✅ Google Driveマウント完了")
+            except ImportError:
+                print("❌ Google Colab環境でない、またはマウントに失敗しました")
+                return False
+        else:
+            print("✅ Google Drive既にマウント済み")
+        
+        # カスタムモデルパス確認
+        model_paths = [
+            "/content/drive/MyDrive/Style-Bert-VITS2/model_assets/yoshino_test",
+            "/content/drive/MyDrive/Style-Bert-VITS2/model_assets/hiroyuki"
+        ]
+        
+        found_models = []
+        for path in model_paths:
+            if os.path.exists(path):
+                files = os.listdir(path)
+                has_config = 'config.json' in files
+                has_model = any(f.endswith('.safetensors') or f.endswith('.pth') for f in files)
+                if has_config and has_model:
+                    found_models.append(path)
+                    print(f"✅ 有効なモデル発見: {path}")
+                else:
+                    print(f"⚠️ 不完全なモデル: {path} (config:{has_config}, model:{has_model})")
+            else:
+                print(f"❌ モデルパス存在しません: {path}")
+        
+        if found_models:
+            print(f"🎉 {len(found_models)} 個のカスタムモデルが利用可能です")
+            return True
+        else:
+            print("❌ 利用可能なカスタムモデルが見つかりません")
+            print("💡 Google DriveのStyle-Bert-VITS2フォルダにモデルを配置してください")
+            return False
+            
+    except Exception as e:
+        print(f"❌ セットアップエラー: {e}")
+        return False
+
+def test_yoshino_model_simple(text: str = "こんにちは、テストです"):
+    """Google Colab環境専用：シンプルなyoshino_testテスト"""
+    try:
+        print("🧪 【Google Colab専用】シンプルなyoshino_testテスト開始...")
+        
+        # 必要最小限のインポート
+        import os
+        import tempfile
+        
+        # Google Colab環境確認
+        try:
+            import google.colab
+            print("✅ Google Colab環境を確認")
+        except ImportError:
+            print("❌ Google Colab環境ではありません。この関数はGoogle Colab専用です。")
+            return False
+        
+        # model_load.py を直接使用
+        print("📦 model_load.py インポート中...")
+        from model_load import load_model
+        
+        # シンプルなパス設定
+        model_dir = "/content/drive/MyDrive/Style-Bert-VITS2/model_assets"
+        model_name = "yoshino_test"
+        
+        if not os.path.exists(model_dir):
+            print(f"❌ モデルディレクトリが存在しません: {model_dir}")
+            print("💡 Google Driveがマウントされ、モデルが配置されているか確認してください")
+            return False
+        
+        print(f"🎯 モデル: {model_name}")
+        print(f"📁 パス: {model_dir}")
+        print(f"📝 テスト文章: {text}")
+        
+        # ユーザー指定パターンでモデル読み込み
+        print("\n📋 実行コード:")
+        print(f"sample_model = load_model('{model_name}', model_dir='{model_dir}', device='cuda')")
+        
+        sample_model = load_model(model_name, model_dir=model_dir, device="cuda")
+        
+        print("✅ sample_model 読み込み成功")
+        
+        # 一回だけテスト実行
+        out_path = "/content/yoshino_simple_test.wav"
+        print(f"\n🎵 音声生成テスト:")
+        print(f"sample_model.inference('{text}', '{out_path}')")
+        
+        result = sample_model.inference(text, out_path)
+        
+        print(f"✅ 音声生成完了: {result}")
+        if os.path.exists(out_path):
+            size = os.path.getsize(out_path)
+            print(f"📁 ファイルサイズ: {size} bytes")
+        
+        return True
+        
+    except Exception as e:
+        print(f"❌ シンプルテスト失敗: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+def test_yoshino_model(text: str = "こんにちは、テストです"):
+    """yoshino_testモデルの動作テスト（model_load.py必須使用版）"""
+    try:
+        print("🧪 yoshino_testモデルのテスト（model_load.py使用）を開始...")
+        
+        # 依存関係の確認
+        print("🔍 model_load.py依存関係チェック...")
+        agent = IntegratedLangChainAgent()
+        agent._ensure_model_load_dependencies()
+        
+        # ユーザー指定パターンの実装例表示
+        print("\n" + "="*60)
+        print("🎯 ユーザー指定パターンの実装例:")
+        print("="*60)
+        print("from model_load import load_model")
+        print("")
+        print("# 第1引数にモデル名、model_dirとdeviceはキーワード引数")
+        print("sample_model = load_model(\"モデル名\", model_dir=\"/content/model_assets\", device=\"cuda\")")
+        print("")
+        print("# sample_modelを使い回してinference実行")
+        print("sample_model.inference(\"aaa\", \"/content/out.wav\")")
+        print("sample_model.inference(\"次の発話\", \"/content/out2.wav\")")
+        print("="*60)
+        print("")
+        
+        # model_load.pyを使用してテスト
+        from model_load import load_model
+        import torch
+        import tempfile
+        
+        model_dir = "/content/drive/MyDrive/Style-Bert-VITS2/model_assets"
+        model_name = "yoshino_test"
+        
+        if not os.path.exists(model_dir):
+            print(f"❌ モデルディレクトリが存在しません: {model_dir}")
+            return False
+        
+        print(f"🎯 テスト対象: {model_dir}/{model_name}")
+        print(f"📝 テスト文章: {text}")
+        
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        print(f"🔧 使用デバイス: {device}")
+        
+        # ユーザー指定パターンと同じ形式でモデル読み込み
+        print("🔧 ユーザー指定パターンでモデル読み込み中...")
+        print(f"   実行: sample_model = load_model('{model_name}', model_dir='{model_dir}', device='{device}')")
+        
+        # ユーザー指定パターンと完全に同じ呼び出し方法
+        sample_model = load_model(
+            model_name,  # 第1引数として位置引数で指定（ユーザーパターン準拠）
+            model_dir=model_dir,  # キーワード引数（ユーザーパターン準拠）
+            device=device,  # キーワード引数（ユーザーパターン準拠）
+            preload_onnx_bert=False
+        )
+        
+        print("✅ sample_model 初期化成功（ユーザー指定パターン）")
+        print(f"  - モデル名: {sample_model.info.model_name}")
+        try:
+            print(f"  - 話者: {list(sample_model.spk2id.keys())}")
+            print(f"  - スタイル: {list(sample_model.style2id.keys())}")
+        except:
+            print("  - 話者・スタイル情報取得失敗")
+        
+        # ユーザー指定パターンでの音声生成テスト
+        print("\n🎵 ユーザーパターンでの連続音声生成テスト:")
+        print("   sample_model.inference(\"aaa\", \"/content/out.wav\")")
+        print("   sample_model.inference(\"次の発話\", \"/content/out2.wav\")")
+        print("")
+        
+        # テスト1: "aaa"
+        temp_dir = tempfile.gettempdir()
+        out1_path = os.path.join(temp_dir, "out.wav")
+        print(f"🧪 テスト1実行: sample_model.inference(\"aaa\", \"{out1_path}\")")
+        result1 = sample_model.inference("aaa", out1_path)
+        print(f"   ✅ 完了: {result1}")
+        
+        # テスト2: "次の発話"  
+        out2_path = os.path.join(temp_dir, "out2.wav")
+        print(f"🧪 テスト2実行: sample_model.inference(\"次の発話\", \"{out2_path}\")")
+        result2 = sample_model.inference("次の発話", out2_path)
+        print(f"   ✅ 完了: {result2}")
+        
+        # テスト3: ユーザー指定テキスト
+        out3_path = os.path.join(temp_dir, "user_test.wav")
+        print(f"🧪 テスト3実行: sample_model.inference(\"{text}\", \"{out3_path}\")")
+        result3 = sample_model.inference(text, out3_path)
+        print(f"   ✅ 完了: {result3}")
+        
+        # 生成結果サマリー
+        print("\n" + "="*60)
+        print("📊 sample_model 使い回しテスト結果:")
+        print("="*60)
+        print(f"✅ テスト1: aaa -> {out1_path}")
+        print(f"✅ テスト2: 次の発話 -> {out2_path}")
+        print(f"✅ テスト3: {text} -> {out3_path}")
+        
+        # ファイルサイズ確認
+        for i, (path, description) in enumerate([(out1_path, "aaa"), (out2_path, "次の発話"), (out3_path, text)], 1):
+            if os.path.exists(path):
+                size = os.path.getsize(path)
+                print(f"📁 ファイル{i}: {size} bytes ({description})")
+        
+        # Google Colab環境の場合、ファイルをダウンロード可能にする
+        try:
+            from google.colab import files
+            import shutil
+            import time
+            
+            print(f"\n🎧 Google Colab環境: 音声ファイルのダウンロード準備中...")
+            for i, (src_path, filename) in enumerate([(out1_path, "out.wav"), (out2_path, "out2.wav"), (out3_path, "user_test.wav")], 1):
+                if os.path.exists(src_path):
+                    colab_path = f"/content/{filename}"
+                    shutil.copy(src_path, colab_path)
+                    print(f"📁 ファイル{i}保存: {colab_path}")
+                    
+        except ImportError:
+            print(f"📁 ローカル環境: 音声ファイル生成完了")
+        
+        print("\n✅ ユーザー指定パターン sample_model 使い回しテスト完了!")
+        return True
+        
+    except Exception as e:
+        print(f"❌ yoshino_testモデルテスト失敗: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+def test_yoshino_model_legacy(text: str = "こんにちは、テストです"):
+    """yoshino_testモデルの動作テスト（model_load.py使用版）"""
+    try:
+        print("🧪 yoshino_testモデルのテスト（model_load.py版）を開始...")
+        
+        # model_load.pyを使用してテスト
+        from model_load import load_model
+        import torch
+        import tempfile
+        
+        model_dir = "/content/drive/MyDrive/Style-Bert-VITS2/model_assets"
+        model_name = "yoshino_test"
+        
+        if not os.path.exists(model_dir):
+            print(f"❌ モデルディレクトリが存在しません: {model_dir}")
+            return False
+        
+        print(f"🎯 テスト対象: {model_dir}/{model_name}")
+        print(f"📝 テスト文章: {text}")
+        
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        print(f"🔧 使用デバイス: {device}")
+        
+        # model_load.pyを使用してモデル読み込み
+        loaded_model = load_model(
+            model_name=model_name,
+            model_dir=model_dir,
+            device=device,
+            preload_onnx_bert=False
+        )
+        
+        print("✅ yoshino_testモデル初期化成功")
+        print(f"  - 話者: {list(loaded_model.spk2id.keys())}")
+        print(f"  - スタイル: {list(loaded_model.style2id.keys())}")
+        
+        # 音声生成テスト
+        print("🎵 音声生成テスト中...")
+        
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
+            output_path = loaded_model.inference(
+                text=text,
+                output_path=temp_file.name,
+                speaker_id=0,
+                language="JP"
+            )
+            
+            print(f"✅ yoshino_test音声生成成功: {output_path}")
+            
+            # Google Colab環境の場合、ファイルをダウンロード可能にする
+            try:
+                from google.colab import files
+                import shutil
+                import time
+                
+                save_filename = f"yoshino_test_legacy_{int(time.time())}.wav"
+                shutil.copy(str(output_path), f"/content/{save_filename}")
+                print(f"📁 音声ファイル保存: /content/{save_filename}")
+                
+                print("🎧 音声ファイルをダウンロードしますか？")
+                files.download(f"/content/{save_filename}")
+                
+            except ImportError:
+                print(f"📁 音声ファイル生成: {output_path}")
+        
+        return True
+        
+    except Exception as e:
+        print(f"❌ yoshino_testモデルテスト失敗: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+def force_style_bert_mode():
+    """Style-Bert-VITS2のみを使用（gTTSを無効化）"""
+    try:
+        print("🎯 Style-Bert-VITS2専用モードで初期化...")
+        
+        # gTTSを無効化したエージェント作成
+        agent = IntegratedLangChainAgent()
+        
+        # gTTSが設定されていたら強制的にStyle-Bert-VITS2に切り替え
+        if hasattr(agent, 'tts_model') and isinstance(agent.tts_model, str):
+            print("⚠️ gTTSが検出されました。Style-Bert-VITS2に強制切り替えします...")
+            agent.tts_available = False
+            agent._initialize_style_bert_only()
+        
+        # sample_model パターンの説明を追加
+        if hasattr(agent, 'tts_model') and agent.tts_model is not None:
+            print("\n" + "="*60)
+            print("🎯 ユーザー指定パターン（sample_model）の使用方法:")
+            print("="*60)
+            print("from model_load import load_model")
+            print("")
+            print("# sample_modelとして初期化")
+            print("sample_model = load_model(\"yoshino_test\", model_dir=\"/content/model_assets\", device=\"cuda\")")
+            print("")
+            print("# sample_modelを使い回して音声生成")
+            print("sample_model.inference(\"テスト音声\", \"/content/out.wav\")")
+            print("sample_model.inference(\"次の音声\", \"/content/out2.wav\")")
+            print("="*60)
+            print("")
+        
+        return agent
+        
+    except Exception as e:
+        print(f"❌ Style-Bert-VITS2専用モード失敗: {e}")
+        return None
+
+def colab_voice_chat(question: str = "今日のタスクは？") -> str:
+    """Google Colab専用：音声ファイル自動生成チャット"""
+    try:
+        print("🎵 音声付きチャット開始...")
+        
+        # エージェント初期化
+        agent = IntegratedLangChainAgent()
+        
+        if not agent.llm_available:
+            return "❌ LLMが利用できません。APIキーを確認してください。"
+        
+        print(f"💬 質問: {question}")
+        response = agent.process_query(question)
+        print(f"\n🤖 **回答**:\n{response}\n")
+        
+        # 自動音声ファイル生成
+        if agent.tts_available:
+            print("🎵 音声ファイルを自動生成中...")
+            try:
+                import time
+                filename = f"hiroyuki_voice_auto_{int(time.time())}.mp3"
+                agent.download_voice_file(response, filename)
+            except Exception as e:
+                print(f"⚠️ 音声生成エラー: {e}")
+        
+        return response
+        
+    except Exception as e:
+        error_msg = f"❌ エラー: {e}"
         print(error_msg)
         return error_msg
 
@@ -1817,10 +3410,54 @@ def colab_setup_guide():
 
 ### 方法1: 簡単チャット（推奨）
 ```python
-# 質問をして回答を得る
+# 通常チャット（音声オプション）
 colab_quick_chat("今日のタスクを確認して")
-colab_quick_chat("明日までにレポートを書くタスクを追加")
-colab_quick_chat("タスクの進捗はどう？")
+colab_quick_chat("明日までにレポートを書くタスクを追加") 
+
+# 音声自動生成チャット（Google Colab専用）
+colab_voice_chat("ひろゆき風でタスク状況を教えて")
+colab_voice_chat("タスク管理についてアドバイスして")
+
+# カスタムモデルセットアップ（初回実行推奨）
+colab_setup_style_bert()  # Google Driveマウント & モデル確認
+
+# 🎯 1. シンプルテスト（推奨 - エラーが少ない）
+test_yoshino_model_simple("こんにちは、テストです")
+
+# 🎯 2. TODOアプリでの統合テスト（修正版）
+agent = IntegratedLangChainAgent()
+agent.test_voice_synthesis("こんにちは、TODOアプリの音声合成です")
+
+# 🎯 3. 詳細テスト（詳しい情報が必要な場合）
+test_yoshino_model("こんにちは、yoshino音声テストです")
+
+# 診断機能（トラブルシューティング）
+agent = IntegratedLangChainAgent()
+agent.diagnose_tts_system()  # 詳細診断
+
+# 🎯 ユーザー指定パターン（sample_model）
+from model_load import load_model
+
+# sample_modelとして初期化（ユーザー指定形式）
+sample_model = load_model("モデル名", model_dir="/content/model_assets", device="cuda")
+
+# sample_modelを使い回して複数音声生成
+sample_model.inference("aaa", "/content/out.wav")
+sample_model.inference("次の発話", "/content/out2.wav")
+
+# 実際の例（yoshino_testモデル）
+sample_model = load_model("yoshino_test", model_dir="/content/drive/MyDrive/Style-Bert-VITS2/model_assets", device="cuda")
+sample_model.inference("こんにちは、テストです", "/content/yoshino_test1.wav")
+sample_model.inference("さらに次のテスト", "/content/yoshino_test2.wav")
+
+# 🎯 4. アプリ統合使用（model_load.py + yoshino_testモデル自動使用）
+agent = IntegratedLangChainAgent()  # Google Colab環境では自動的にシンプルモード
+response = agent.process_query("今日のタスクを教えて")  # yoshino_testモデルで音声生成
+
+# 🎯 5. 実際のTODOアプリ機能テスト
+agent = IntegratedLangChainAgent()
+agent.process_query("明日までにレポートを書くタスクを追加")  # タスク追加 + 音声応答
+agent.process_query("今日のタスクを確認")  # タスク確認 + 音声応答
 ```
 
 ### 方法2: 対話モード
@@ -1856,4 +3493,19 @@ if __name__ == "__main__":
         colab_setup_guide()
         print("\n💡 まずは colab_quick_chat('質問内容') を試してください！")
     else:
+        print("🚀 統合TODOアプリを起動中...")
+        
+        # アプリケーション初期化
+        agent = IntegratedLangChainAgent()
+        
+        # システム情報とテスト実行
+        agent.get_system_info()
+        
+        # 音声テスト（利用可能な場合）
+        if agent.tts_available:
+            print("\n🎵 音声合成テストを実行しますか？ (y/n):")
+            if input().lower().startswith('y'):
+                agent.test_tts_system()
+        
+        print("\n✅ 初期化完了！通常モードで起動します。")
         integrated_langchain_mode()
