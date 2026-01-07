@@ -72,6 +72,17 @@ except ImportError:
         print("統合LangChain自然言語モードは利用できません（LangChain依存関係が不足しています）")
         print("requirements.txtから必要な依存関係をインストールしてください。")
 
+# RAGモード
+try:
+    from rag_mode import rag_mode
+    RAG_MODE_AVAILABLE = True
+    print("✅ RAGモード（PDF質疑応答）が利用可能です")
+except ImportError:
+    RAG_MODE_AVAILABLE = False
+    def rag_mode():
+        print("RAGモードは利用できません（依存関係が不足しています）")
+        print("pip install llama-index pdfplumber")
+
 
 # CSVファイルのパス定義
 CSV_FILE = "tasks.csv"
@@ -256,7 +267,8 @@ def show_menu() -> None:
     print("2. タスク確認")
     print("3. タスク完了")
     print("4. 🤖 AI自然言語モード（LangChain統合）")
-    print("5. 終了")
+    print("5. 📄 RAGモード（PDF質疑応答）")
+    print("6. 終了")
     print("="*40)
 
 # メニュー画面の選択に応じた挙動
@@ -268,7 +280,7 @@ def main() -> None:
     
     while True:
         show_menu()
-        choice = input("選択してください (1-5): ").strip()
+        choice = input("選択してください (1-6): ").strip()
         
         if choice == "1":
             add_task()
@@ -279,10 +291,12 @@ def main() -> None:
         elif choice == "4":
             natural_language_mode()
         elif choice == "5":
+            rag_mode()
+        elif choice == "6":
             print("アプリケーションを終了します。")
             break
         else:
-            print("エラー: 1-5の数字を入力してください。")
+            print("エラー: 1-6の数字を入力してください。")
 
 
 if __name__ == "__main__":
