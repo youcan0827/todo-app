@@ -4,10 +4,12 @@
 import os
 import csv
 import datetime
+from typing import Optional
 
 try:
-    from llama_index.core import SimpleDirectoryReader, VectorStoreIndex, Settings, PromptTemplate
+    from llama_index.core import SimpleDirectoryReader, VectorStoreIndex, Settings
     from llama_index.core.node_parser import SentenceSplitter
+    from llama_index.core.prompts import PromptTemplate
     RAG_AVAILABLE = True
 except ImportError:
     RAG_AVAILABLE = False
@@ -27,22 +29,12 @@ def save_rag_conversation(pdf_file: str, question: str, answer: str) -> None:
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         writer.writerow([timestamp, pdf_file, question, answer])
 
-QA_TEMPLATE = None
-if RAG_AVAILABLE:
-    QA_TEMPLATE = PromptTemplate(
-        "以下のコンテキスト情報を参照してください。\n"
-        "---------------------\n"
-        "{context_str}\n"
-        "---------------------\n"
-        "上記の情報に基づき、以下の質問に日本語で回答してください。\n"
-        "質問: {query_str}\n"
-        "回答:"
-    )
 
 def rag_mode() -> None:
     if not RAG_AVAILABLE:
         print("\n❌ RAGモードは利用できません")
-        print("pip install llama-index llama-index-readers-file")
+        print("必要な依存関係をインストールしてください：")
+        print("pip install llama-index")
         return
     
     initialize_rag_csv()
@@ -60,35 +52,52 @@ def rag_mode() -> None:
         print("❌ PDFファイルを指定してください")
         return
     
-    print("📄 PDFを読み込んでいます...")
-    documents = SimpleDirectoryReader(input_files=[pdf_path]).load_data()
+    try:
+        print("📄 PDFを読み込んでいます...")
+        documents = SimpleDirectoryReader(input_files=[pdf_path]).load_data()
 
-    if not documents:
-        print("❌ PDFからテキストを抽出できませんでした")
-        return
+        if not documents:
+            print("❌ PDFからテキストを抽出できませんでした")
+            return
 
-    print("🧠 インデックスを作成しています...")
-    Settings.node_parser = SentenceSplitter(chunk_size=512, chunk_overlap=50)
-    index = VectorStoreIndex.from_documents(documents)
-    query_engine = index.as_query_engine(text_qa_template=QA_TEMPLATE)
+        print("🧠 インデックスを作成しています...")
+        Settings.node_parser = SentenceSplitter(chunk_size=512, chunk_overlap=50)
+        index = VectorStoreIndex.from_documents(documents)
 
-    print("✅ インデックス作成完了！")
-    print("PDFについて質問してください（'exit'で終了）")
+        qa_prompt_tmpl = PromptTemplate(
+            "あなたは日本語で回答するアシスタントです。"
+            "以下の情報を参考にして、質問に日本語で正確に答えてください。\n\n"
+            "情報:\n{context_str}\n\n"
+            "質問: {query_str}\n"
+            "回答:"
+        )
+        query_engine = index.as_query_engine(text_qa_template=qa_prompt_tmpl)
+        
+        print("✅ インデックス作成完了！")
+        print("\nPDFについて質問してください（'exit'で終了）")
+        
+        pdf_filename = os.path.basename(pdf_path)
+        
+        while True:
+            question = input("\n質問: ").strip()
+            
+            if question.lower() == 'exit':
+                break
+            
+            if not question:
+                print("質問を入力してください")
+                continue
+            
+            print("🤖 回答を生成中...")
+            response = query_engine.query(question)
+            answer = str(response)
+            
+            print(f"\n回答: {answer}")
+            
+            save_rag_conversation(pdf_filename, question, answer)
+            print("✅ 会話を記録しました")
+        
+        print("\nRAGモードを終了します")
 
-    pdf_filename = os.path.basename(pdf_path)
-
-    while True:
-        question = input("\n質問: ").strip()
-        if question.lower() == 'exit':
-            break
-        if not question:
-            continue
-
-        print("🤖 回答を生成中...")
-        response = query_engine.query(question)
-        answer = str(response)
-        print(f"\n回答: {answer}")
-        save_rag_conversation(pdf_filename, question, answer)
-        print("✅ 会話を記録しました")
-
-    print("\nRAGモードを終了します")
+    except Exception as e:
+        print(f"❌ エラーが発生しました: {e}")

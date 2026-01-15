@@ -3,7 +3,11 @@ import os
 import sys
 
 # pyopenjtalk を直接使用（ワーカーモード無効）
-_style_bert_root = '/content/drive/MyDrive/todo-app/Style-Bert-VITS2'
+# 環境に応じたパス自動検出（Googleコラボとローカル両対応）
+if os.path.exists('/content/drive/MyDrive/todo-app/Style-Bert-VITS2'):
+    _style_bert_root = '/content/drive/MyDrive/todo-app/Style-Bert-VITS2'
+else:
+    _style_bert_root = '/Users/yoshinomukanou/todo-app/Style-Bert-VITS2'
 _tts_initialized = False
 
 os.environ["PYOPENJTALK_G2P_WORKER"] = "0"
@@ -92,7 +96,7 @@ def _get_tts_model():
         try:
             os.chdir(_style_bert_root)
             print(f"[TTS DEBUG] load_model呼び出し: dir={_style_bert_root}", flush=True)
-            _tts_model = load_model("yoshino_test", model_dir="/content/drive/MyDrive/Style-Bert-VITS2/model_assets", device="cuda")
+            _tts_model = load_model("yoshino_test", model_dir=f"{_style_bert_root}/model_assets", device="cpu")
             print(f"[TTS DEBUG] load_model完了: model={type(_tts_model)}", flush=True)
         except Exception as e:
             print(f"[TTS DEBUG] load_modelエラー: {type(e).__name__}: {e}")
@@ -109,7 +113,9 @@ def speak_hiroyuki(text: str) -> str:
     try:
         global _audio_counter
         _audio_counter += 1
-        out_path = f"/content/hiroyuki_{_audio_counter}.wav"
+        audio_dir = _style_bert_root.replace('/Style-Bert-VITS2', '/audio')
+        os.makedirs(audio_dir, exist_ok=True)
+        out_path = f"{audio_dir}/hiroyuki_{_audio_counter}.wav"
         print(f"[TTS DEBUG] 出力パス: {out_path}")
         print(f"[TTS DEBUG] モデル取得中...", flush=True)
         model = _get_tts_model()
